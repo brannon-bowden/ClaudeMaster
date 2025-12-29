@@ -5,9 +5,10 @@ use shared::{Event, Group, PtyOutputData, Session, SessionStatus, StatusChangedD
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::{broadcast, mpsc};
-use tracing::info;
+use tracing::{debug, info};
 use uuid::Uuid;
 
+use crate::claude;
 use crate::pty::PtyManager;
 use crate::state::{save_state, SharedState};
 
@@ -34,6 +35,20 @@ impl SessionManager {
         info!("Session manager started");
 
         while let Some((session_id, data)) = output_rx.recv().await {
+            // Convert to string for status detection (lossy is fine for pattern matching)
+            let text = String::from_utf8_lossy(&data);
+
+            // Detect status changes
+            if let Some(new_status) = claude::detect_status(&text) {
+                self.update_session_status(session_id, new_status).await;
+            }
+
+            // Extract Claude session ID if present
+            if let Some(claude_session_id) = claude::extract_session_id(&text) {
+                self.update_claude_session_id(session_id, claude_session_id).await;
+            }
+
+            // Forward output as event
             let output = BASE64.encode(&data);
             let event = Event {
                 event: "pty.output".to_string(),
@@ -44,6 +59,44 @@ impl SessionManager {
                 .unwrap(),
             };
             let _ = self.event_tx.send(event);
+        }
+    }
+
+    async fn update_session_status(&self, session_id: Uuid, new_status: SessionStatus) {
+        let mut status_changed = false;
+        {
+            let mut s = self.state.write().await;
+            if let Some(session) = s.sessions.get_mut(&session_id) {
+                if session.status != new_status {
+                    debug!("Session {} status: {:?} -> {:?}", session_id, session.status, new_status);
+                    session.status = new_status;
+                    session.last_activity = Utc::now();
+                    status_changed = true;
+                }
+            }
+        }
+
+        if status_changed {
+            // Emit status change event
+            let event = Event {
+                event: "session.status_changed".to_string(),
+                data: serde_json::to_value(StatusChangedData {
+                    session_id,
+                    status: new_status,
+                })
+                .unwrap(),
+            };
+            let _ = self.event_tx.send(event);
+        }
+    }
+
+    async fn update_claude_session_id(&self, session_id: Uuid, claude_session_id: String) {
+        let mut s = self.state.write().await;
+        if let Some(session) = s.sessions.get_mut(&session_id) {
+            if session.claude_session_id.as_ref() != Some(&claude_session_id) {
+                debug!("Session {} claude_session_id: {:?}", session_id, claude_session_id);
+                session.claude_session_id = Some(claude_session_id);
+            }
         }
     }
 

@@ -18,6 +18,7 @@ dependencies = [
  "directories",
  "interprocess",
  "portable-pty",
+ "regex",
  "serde",
  "serde_json",
  "shared",
