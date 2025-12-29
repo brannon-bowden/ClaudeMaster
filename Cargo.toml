@@ -1,7 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["daemon", "shared"]
-# gui/src-tauri will be added after Tauri setup in Task 3
+members = ["daemon", "shared", "gui/src-tauri"]
 
 [workspace.package]
 version = "0.1.0"
