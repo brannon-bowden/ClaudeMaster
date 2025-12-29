@@ -1,6 +1,6 @@
 // New Session Dialog Component
 
-import { createSignal, Show } from "solid-js";
+import { createSignal, Show, For } from "solid-js";
 import { open } from "@tauri-apps/plugin-dialog";
 import { appStore } from "../stores/appStore";
 
@@ -13,6 +13,7 @@ interface NewSessionDialogProps {
 export function NewSessionDialog(props: NewSessionDialogProps) {
   const [name, setName] = createSignal("");
   const [directory, setDirectory] = createSignal("");
+  const [selectedGroupId, setSelectedGroupId] = createSignal<string | undefined>(props.groupId);
   const [isCreating, setIsCreating] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
 
@@ -45,10 +46,11 @@ export function NewSessionDialog(props: NewSessionDialogProps) {
     setError(null);
 
     try {
-      await appStore.createSession(name().trim(), directory().trim(), props.groupId);
+      await appStore.createSession(name().trim(), directory().trim(), selectedGroupId());
       // Reset and close
       setName("");
       setDirectory("");
+      setSelectedGroupId(undefined);
       props.onClose();
     } catch (e) {
       setError(String(e));
@@ -116,6 +118,27 @@ export function NewSessionDialog(props: NewSessionDialogProps) {
                 </button>
               </div>
             </div>
+
+            {/* Group Selection */}
+            <Show when={appStore.groups().length > 0}>
+              <div>
+                <label class="block text-sm font-medium text-gray-300 mb-1">
+                  Group (optional)
+                </label>
+                <select
+                  value={selectedGroupId() || ""}
+                  onChange={(e) => setSelectedGroupId(e.currentTarget.value || undefined)}
+                  class="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                >
+                  <option value="">No group</option>
+                  <For each={appStore.groups()}>
+                    {(group) => (
+                      <option value={group.id}>{group.name}</option>
+                    )}
+                  </For>
+                </select>
+              </div>
+            </Show>
 
             {/* Error Message */}
             <Show when={error()}>

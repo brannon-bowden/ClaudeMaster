@@ -3,6 +3,7 @@
 import { For, Show, createMemo, createSignal } from "solid-js";
 import { appStore } from "../stores/appStore";
 import { NewSessionDialog } from "./NewSessionDialog";
+import { NewGroupDialog } from "./NewGroupDialog";
 import { SettingsModal } from "./SettingsModal";
 import type { GroupNode, Session, SessionStatus } from "../types";
 
@@ -106,6 +107,7 @@ function GroupItem(props: { group: GroupNode; depth?: number }) {
 export function Sidebar() {
   const tree = createMemo(() => appStore.groupTree);
   const [isNewSessionOpen, setIsNewSessionOpen] = createSignal(false);
+  const [isNewGroupOpen, setIsNewGroupOpen] = createSignal(false);
   const [isSettingsOpen, setIsSettingsOpen] = createSignal(false);
 
   return (
@@ -157,26 +159,48 @@ export function Sidebar() {
 
       {/* Footer actions */}
       <div class="p-2 border-t border-gray-700 space-y-2">
-        <button
-          class="w-full flex items-center justify-center gap-2 px-3 py-2 text-sm bg-gray-700 hover:bg-gray-600 rounded-md text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          disabled={!appStore.isConnected()}
-          onClick={() => setIsNewSessionOpen(true)}
-        >
-          <svg
-            class="w-4 h-4"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
+        <div class="flex gap-2">
+          <button
+            class="flex-1 flex items-center justify-center gap-2 px-3 py-2 text-sm bg-indigo-600 hover:bg-indigo-700 rounded-md text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            disabled={!appStore.isConnected()}
+            onClick={() => setIsNewSessionOpen(true)}
           >
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="2"
-              d="M12 4v16m8-8H4"
-            />
-          </svg>
-          New Session
-        </button>
+            <svg
+              class="w-4 h-4"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M12 4v16m8-8H4"
+              />
+            </svg>
+            Session
+          </button>
+          <button
+            class="flex-1 flex items-center justify-center gap-2 px-3 py-2 text-sm bg-gray-700 hover:bg-gray-600 rounded-md text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            disabled={!appStore.isConnected()}
+            onClick={() => setIsNewGroupOpen(true)}
+          >
+            <svg
+              class="w-4 h-4"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"
+              />
+            </svg>
+            Group
+          </button>
+        </div>
         <button
           class="w-full flex items-center justify-center gap-2 px-3 py-2 text-sm text-gray-400 hover:text-white hover:bg-gray-700 rounded-md transition-colors"
           onClick={() => setIsSettingsOpen(true)}
@@ -208,6 +232,12 @@ export function Sidebar() {
       <NewSessionDialog
         isOpen={isNewSessionOpen()}
         onClose={() => setIsNewSessionOpen(false)}
+      />
+
+      {/* New Group Dialog */}
+      <NewGroupDialog
+        isOpen={isNewGroupOpen()}
+        onClose={() => setIsNewGroupOpen(false)}
       />
 
       {/* Settings Modal */}
