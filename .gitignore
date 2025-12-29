@@ -1,0 +1,19 @@
+# Worktrees
+.worktrees/
+
+# Build outputs
+target/
+dist/
+node_modules/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
