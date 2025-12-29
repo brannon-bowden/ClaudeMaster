@@ -7,7 +7,7 @@ use std::path::PathBuf;
 
 /// Get the application data directory
 pub fn get_data_dir() -> Result<PathBuf> {
-    let proj_dirs = ProjectDirs::from("com", "agentdeck", "agent-deck")
+    let proj_dirs = ProjectDirs::from("com", "claudemaster", "claude-master")
         .ok_or_else(|| anyhow::anyhow!("Could not determine data directory"))?;
     let data_dir = proj_dirs.data_dir().to_path_buf();
     fs::create_dir_all(&data_dir)?;
@@ -37,7 +37,7 @@ pub fn get_socket_path() -> Result<PathBuf> {
     #[cfg(windows)]
     {
         // On Windows, we use the data dir path to create a unique named pipe
-        // The actual pipe path will be \\.\pipe\agent-deck-daemon
+        // The actual pipe path will be \\.\pipe\claude-master-daemon
         // But we return a file path that the interprocess crate can convert
         Ok(get_data_dir()?.join("daemon.sock"))
     }

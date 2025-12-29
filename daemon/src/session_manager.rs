@@ -55,7 +55,7 @@ impl SessionManager {
             // Forward output as event
             let output = BASE64.encode(&data);
             let event = Event {
-                event: "pty.output".to_string(),
+                event: "pty:output".to_string(),
                 data: serde_json::to_value(PtyOutputData { session_id, output }).unwrap(),
             };
             let _ = self.event_tx.send(event);
@@ -82,7 +82,7 @@ impl SessionManager {
         if status_changed {
             // Emit status change event
             let event = Event {
-                event: "session.status_changed".to_string(),
+                event: "session:status_changed".to_string(),
                 data: serde_json::to_value(StatusChangedData {
                     session_id,
                     status: new_status,
@@ -152,7 +152,7 @@ impl SessionManager {
 
         // Emit event
         let event = Event {
-            event: "session.created".to_string(),
+            event: "session:created".to_string(),
             data: serde_json::to_value(&session)?,
         };
         let _ = event_tx.send(event);
@@ -178,7 +178,7 @@ impl SessionManager {
         save_state(state).await?;
 
         let event = Event {
-            event: "session.status_changed".to_string(),
+            event: "session:status_changed".to_string(),
             data: serde_json::to_value(StatusChangedData {
                 session_id,
                 status: SessionStatus::Stopped,
@@ -248,7 +248,7 @@ impl SessionManager {
 
         // Emit event
         let event = Event {
-            event: "session.created".to_string(),
+            event: "session:created".to_string(),
             data: serde_json::to_value(&session)?,
         };
         let _ = event_tx.send(event);
@@ -281,7 +281,7 @@ impl SessionManager {
         save_state(state).await?;
 
         let event = Event {
-            event: "session.deleted".to_string(),
+            event: "session:deleted".to_string(),
             data: serde_json::json!({"session_id": session_id}),
         };
         let _ = event_tx.send(event);
@@ -304,7 +304,7 @@ impl SessionManager {
         save_state(state).await?;
 
         let event = Event {
-            event: "group.created".to_string(),
+            event: "group:created".to_string(),
             data: serde_json::to_value(&group)?,
         };
         let _ = event_tx.send(event);
@@ -337,7 +337,7 @@ impl SessionManager {
         save_state(state).await?;
 
         let event = Event {
-            event: "group.deleted".to_string(),
+            event: "group:deleted".to_string(),
             data: serde_json::json!({"group_id": group_id}),
         };
         let _ = event_tx.send(event);

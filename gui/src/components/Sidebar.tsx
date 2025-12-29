@@ -112,7 +112,7 @@ export function Sidebar() {
     <div class="w-64 bg-gray-800 border-r border-gray-700 flex flex-col h-full">
       {/* Header */}
       <div class="p-4 border-b border-gray-700">
-        <h1 class="text-lg font-semibold text-white">Agent Deck</h1>
+        <h1 class="text-lg font-semibold text-white">Claude Master</h1>
         <Show when={appStore.isConnected()}>
           <p class="text-xs text-green-400 mt-1">Connected to daemon</p>
         </Show>

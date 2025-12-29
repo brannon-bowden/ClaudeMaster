@@ -22,7 +22,7 @@ pub struct ConnectionState {
 /// Emit connection state to frontend
 fn emit_connection_state(app: &AppHandle, connected: bool, error: Option<String>) {
     let state = ConnectionState { connected, error };
-    if let Err(e) = app.emit("daemon.connection_state", &state) {
+    if let Err(e) = app.emit("daemon:connection_state", &state) {
         error!("Failed to emit connection state: {}", e);
     }
 }
@@ -33,7 +33,8 @@ pub fn start_event_listener(app: AppHandle) {
     let running = Arc::new(AtomicBool::new(true));
     let running_clone = running.clone();
 
-    tokio::spawn(async move {
+    // Use Tauri's async runtime to spawn the task
+    tauri::async_runtime::spawn(async move {
         let mut reconnect_attempts = 0u32;
         let max_backoff = 30; // Maximum 30 seconds between attempts
 

@@ -72,12 +72,12 @@ let reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
 // Set up event listeners from Tauri
 async function setupEventListeners() {
   // Listen for PTY output
-  await listen<PtyOutputData>("pty.output", (event) => {
+  await listen<PtyOutputData>("pty:output", (event) => {
     terminalStore.writeBase64ToTerminal(event.payload.session_id, event.payload.output);
   });
 
   // Listen for status changes
-  await listen<StatusChangedData>("session.status_changed", (event) => {
+  await listen<StatusChangedData>("session:status_changed", (event) => {
     setSessions((prev) =>
       prev.map((s) =>
         s.id === event.payload.session_id
@@ -88,7 +88,7 @@ async function setupEventListeners() {
   });
 
   // Listen for session created
-  await listen<Session>("session.created", (event) => {
+  await listen<Session>("session:created", (event) => {
     setSessions((prev) => {
       // Avoid duplicates
       if (prev.find((s) => s.id === event.payload.id)) {
@@ -99,7 +99,7 @@ async function setupEventListeners() {
   });
 
   // Listen for session deleted
-  await listen<{ session_id: string }>("session.deleted", (event) => {
+  await listen<{ session_id: string }>("session:deleted", (event) => {
     setSessions((prev) => prev.filter((s) => s.id !== event.payload.session_id));
     if (selectedSessionId() === event.payload.session_id) {
       setSelectedSessionId(null);
@@ -107,7 +107,7 @@ async function setupEventListeners() {
   });
 
   // Listen for group created
-  await listen<Group>("group.created", (event) => {
+  await listen<Group>("group:created", (event) => {
     setGroups((prev) => {
       if (prev.find((g) => g.id === event.payload.id)) {
         return prev;
@@ -117,12 +117,12 @@ async function setupEventListeners() {
   });
 
   // Listen for group deleted
-  await listen<{ group_id: string }>("group.deleted", (event) => {
+  await listen<{ group_id: string }>("group:deleted", (event) => {
     setGroups((prev) => prev.filter((g) => g.id !== event.payload.group_id));
   });
 
   // Listen for connection state changes from event listener
-  await listen<ConnectionStateData>("daemon.connection_state", (event) => {
+  await listen<ConnectionStateData>("daemon:connection_state", (event) => {
     const wasConnected = isConnected();
     setIsConnected(event.payload.connected);
 

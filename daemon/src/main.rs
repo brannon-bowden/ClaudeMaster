@@ -20,7 +20,7 @@ use crate::state::{load_state, new_shared_state};
 async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
 
-    info!("Agent Deck daemon starting...");
+    info!("Claude Master daemon starting...");
 
     let _config = load_config()?;
     info!("Config loaded");

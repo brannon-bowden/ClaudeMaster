@@ -1,4 +1,5 @@
 mod commands;
+mod daemon_launcher;
 mod event_listener;
 mod ipc_client;
 
@@ -18,6 +19,9 @@ pub fn run() {
             client: IpcClient::new(),
         })
         .setup(|app| {
+            // Start the daemon sidecar
+            daemon_launcher::start_daemon(app.handle());
+
             // Start event listener in background
             event_listener::start_event_listener(app.handle().clone());
             Ok(())

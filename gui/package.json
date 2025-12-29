@@ -1,5 +1,5 @@
 {
-  "name": "agent-deck",
+  "name": "claude-master",
   "private": true,
   "version": "0.1.0",
   "type": "module",
@@ -8,12 +8,13 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
-    "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build",
-    "tauri:build:debug": "tauri build --debug",
+    "tauri:dev": "npm run sidecar:build && tauri dev",
+    "tauri:build": "npm run sidecar:build && tauri build",
+    "tauri:build:debug": "npm run sidecar:build && tauri build --debug",
+    "sidecar:build": "cd src-tauri && ./build-sidecar.sh",
     "daemon:build": "cd .. && cargo build -p agent-deck-daemon --release",
     "daemon:dev": "cd .. && cargo run -p agent-deck-daemon",
-    "build:all": "npm run daemon:build && npm run tauri:build"
+    "build:all": "npm run tauri:build"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",
