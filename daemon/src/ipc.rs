@@ -6,7 +6,7 @@ use interprocess::local_socket::{
 };
 use shared::{
     CreateGroupParams, CreateSessionParams, ErrorInfo, Event, ForkSessionParams, Request, Response,
-    SessionIdParams, SessionInputParams, SessionResizeParams,
+    SessionIdParams, SessionInputParams, SessionResizeParams, UpdateGroupParams, UpdateSessionParams,
 };
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -263,6 +263,46 @@ async fn process_request(line: &str, ctx: &IpcContext) -> Response {
             }
         }
 
+        "session.update" => {
+            let params: UpdateSessionParams = match serde_json::from_value(request.params) {
+                Ok(p) => p,
+                Err(e) => {
+                    return Response {
+                        id: request.id,
+                        result: None,
+                        error: Some(ErrorInfo {
+                            code: -32602,
+                            message: format!("Invalid params: {}", e),
+                        }),
+                    };
+                }
+            };
+
+            match SessionManager::update_session(
+                &ctx.state,
+                &ctx.event_tx,
+                params.session_id,
+                params.name,
+                params.group_id,
+            )
+            .await
+            {
+                Ok(session) => Response {
+                    id: request.id,
+                    result: Some(serde_json::to_value(session).unwrap()),
+                    error: None,
+                },
+                Err(e) => Response {
+                    id: request.id,
+                    result: None,
+                    error: Some(ErrorInfo {
+                        code: -32000,
+                        message: format!("Failed to update session: {}", e),
+                    }),
+                },
+            }
+        }
+
         "session.input" => {
             let params: SessionInputParams = match serde_json::from_value(request.params) {
                 Ok(p) => p,
@@ -455,6 +495,46 @@ async fn process_request(line: &str, ctx: &IpcContext) -> Response {
                     error: Some(ErrorInfo {
                         code: -32000,
                         message: format!("Failed to delete group: {}", e),
+                    }),
+                },
+            }
+        }
+
+        "group.update" => {
+            let params: UpdateGroupParams = match serde_json::from_value(request.params) {
+                Ok(p) => p,
+                Err(e) => {
+                    return Response {
+                        id: request.id,
+                        result: None,
+                        error: Some(ErrorInfo {
+                            code: -32602,
+                            message: format!("Invalid params: {}", e),
+                        }),
+                    };
+                }
+            };
+
+            match SessionManager::update_group(
+                &ctx.state,
+                &ctx.event_tx,
+                params.group_id,
+                params.name,
+                params.parent_id,
+            )
+            .await
+            {
+                Ok(group) => Response {
+                    id: request.id,
+                    result: Some(serde_json::to_value(group).unwrap()),
+                    error: None,
+                },
+                Err(e) => Response {
+                    id: request.id,
+                    result: None,
+                    error: Some(ErrorInfo {
+                        code: -32000,
+                        message: format!("Failed to update group: {}", e),
                     }),
                 },
             }

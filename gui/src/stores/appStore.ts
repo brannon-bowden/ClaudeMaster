@@ -121,6 +121,20 @@ async function setupEventListeners() {
     setGroups((prev) => prev.filter((g) => g.id !== event.payload.group_id));
   });
 
+  // Listen for session updated
+  await listen<Session>("session:updated", (event) => {
+    setSessions((prev) =>
+      prev.map((s) => (s.id === event.payload.id ? event.payload : s))
+    );
+  });
+
+  // Listen for group updated
+  await listen<Group>("group:updated", (event) => {
+    setGroups((prev) =>
+      prev.map((g) => (g.id === event.payload.id ? event.payload : g))
+    );
+  });
+
   // Listen for connection state changes from event listener
   await listen<ConnectionStateData>("daemon:connection_state", (event) => {
     const wasConnected = isConnected();
@@ -262,6 +276,52 @@ async function deleteGroup(groupId: string) {
   }
 }
 
+async function updateSession(
+  sessionId: string,
+  name?: string,
+  groupId?: string | null // undefined = don't change, null = remove from group, string = set group
+) {
+  try {
+    // Convert: undefined = don't pass (backend won't change), null = pass "" (backend removes), string = pass as-is
+    const groupIdParam = groupId === undefined ? undefined : (groupId === null ? "" : groupId);
+    const session = await invoke<Session>("update_session", {
+      sessionId,
+      name: name || null,
+      groupId: groupIdParam,
+    });
+    setSessions((prev) =>
+      prev.map((s) => (s.id === sessionId ? session : s))
+    );
+    return session;
+  } catch (e) {
+    console.error("Failed to update session:", e);
+    throw e;
+  }
+}
+
+async function updateGroup(
+  groupId: string,
+  name?: string,
+  parentId?: string | null // undefined = don't change, null = make root, string = set parent
+) {
+  try {
+    // Convert: undefined = don't pass (backend won't change), null = pass "" (backend makes root), string = pass as-is
+    const parentIdParam = parentId === undefined ? undefined : (parentId === null ? "" : parentId);
+    const group = await invoke<Group>("update_group", {
+      groupId,
+      name: name || null,
+      parentId: parentIdParam,
+    });
+    setGroups((prev) =>
+      prev.map((g) => (g.id === groupId ? group : g))
+    );
+    return group;
+  } catch (e) {
+    console.error("Failed to update group:", e);
+    throw e;
+  }
+}
+
 function toggleGroupCollapse(groupId: string) {
   setGroups((prev) =>
     prev.map((g) => (g.id === groupId ? { ...g, collapsed: !g.collapsed } : g))
@@ -295,7 +355,9 @@ export const appStore = {
   stopSession,
   deleteSession,
   forkSession,
+  updateSession,
   createGroup,
   deleteGroup,
+  updateGroup,
   toggleGroupCollapse,
 };

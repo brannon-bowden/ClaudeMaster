@@ -37,9 +37,11 @@ pub fn run() {
             commands::fork_session,
             commands::send_input,
             commands::resize_session,
+            commands::update_session,
             commands::list_groups,
             commands::create_group,
             commands::delete_group,
+            commands::update_group,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

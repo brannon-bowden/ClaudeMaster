@@ -289,6 +289,40 @@ impl SessionManager {
         Ok(())
     }
 
+    pub async fn update_session(
+        state: &SharedState,
+        event_tx: &broadcast::Sender<Event>,
+        session_id: Uuid,
+        name: Option<String>,
+        group_id: Option<Option<Uuid>>, // None = don't change, Some(None) = remove from group, Some(Some(id)) = set group
+    ) -> Result<Session> {
+        let session = {
+            let mut s = state.write().await;
+            let session = s
+                .sessions
+                .get_mut(&session_id)
+                .ok_or_else(|| anyhow::anyhow!("Session not found"))?;
+
+            if let Some(new_name) = name {
+                session.name = new_name;
+            }
+            if let Some(new_group_id) = group_id {
+                session.group_id = new_group_id;
+            }
+
+            session.clone()
+        };
+        save_state(state).await?;
+
+        let event = Event {
+            event: "session:updated".to_string(),
+            data: serde_json::to_value(&session)?,
+        };
+        let _ = event_tx.send(event);
+
+        Ok(session)
+    }
+
     pub async fn create_group(
         state: &SharedState,
         event_tx: &broadcast::Sender<Event>,
@@ -343,5 +377,43 @@ impl SessionManager {
         let _ = event_tx.send(event);
 
         Ok(())
+    }
+
+    pub async fn update_group(
+        state: &SharedState,
+        event_tx: &broadcast::Sender<Event>,
+        group_id: Uuid,
+        name: Option<String>,
+        parent_id: Option<Option<Uuid>>,
+    ) -> Result<Group> {
+        let group = {
+            let mut s = state.write().await;
+            let group = s
+                .groups
+                .get_mut(&group_id)
+                .ok_or_else(|| anyhow::anyhow!("Group not found"))?;
+
+            if let Some(new_name) = name {
+                group.name = new_name;
+            }
+            if let Some(new_parent_id) = parent_id {
+                // Prevent circular references
+                if new_parent_id == Some(group_id) {
+                    return Err(anyhow::anyhow!("Group cannot be its own parent"));
+                }
+                group.parent_id = new_parent_id;
+            }
+
+            group.clone()
+        };
+        save_state(state).await?;
+
+        let event = Event {
+            event: "group:updated".to_string(),
+            data: serde_json::to_value(&group)?,
+        };
+        let _ = event_tx.send(event);
+
+        Ok(group)
     }
 }

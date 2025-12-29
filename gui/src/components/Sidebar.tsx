@@ -4,8 +4,10 @@ import { For, Show, createMemo, createSignal } from "solid-js";
 import { appStore } from "../stores/appStore";
 import { NewSessionDialog } from "./NewSessionDialog";
 import { NewGroupDialog } from "./NewGroupDialog";
+import { EditSessionDialog } from "./EditSessionDialog";
+import { EditGroupDialog } from "./EditGroupDialog";
 import { SettingsModal } from "./SettingsModal";
-import type { GroupNode, Session, SessionStatus } from "../types";
+import type { Group, GroupNode, Session, SessionStatus } from "../types";
 
 // Status indicator colors
 const statusColors: Record<SessionStatus, string> = {
@@ -17,14 +19,22 @@ const statusColors: Record<SessionStatus, string> = {
 };
 
 // Session item component
-function SessionItem(props: { session: Session }) {
+function SessionItem(props: {
+  session: Session;
+  onEdit: (session: Session) => void;
+}) {
   const isSelected = createMemo(
     () => appStore.selectedSessionId() === props.session.id
   );
 
+  const handleEdit = (e: MouseEvent) => {
+    e.stopPropagation();
+    props.onEdit(props.session);
+  };
+
   return (
     <div
-      class={`flex items-center gap-2 px-3 py-2 cursor-pointer rounded-md transition-colors ${
+      class={`group flex items-center gap-2 px-3 py-2 cursor-pointer rounded-md transition-colors ${
         isSelected()
           ? "bg-indigo-600 text-white"
           : "hover:bg-gray-700 text-gray-300"
@@ -32,29 +42,62 @@ function SessionItem(props: { session: Session }) {
       onClick={() => appStore.setSelectedSessionId(props.session.id)}
     >
       <span
-        class={`w-2 h-2 rounded-full ${statusColors[props.session.status]}`}
+        class={`w-2 h-2 rounded-full flex-shrink-0 ${statusColors[props.session.status]}`}
         title={props.session.status}
       />
       <span class="truncate flex-1">{props.session.name}</span>
+      <button
+        class={`p-1 rounded opacity-0 group-hover:opacity-100 transition-opacity ${
+          isSelected()
+            ? "hover:bg-indigo-500 text-white"
+            : "hover:bg-gray-600 text-gray-400"
+        }`}
+        onClick={handleEdit}
+        title="Edit session"
+      >
+        <svg
+          class="w-3.5 h-3.5"
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+        >
+          <path
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+            d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"
+          />
+        </svg>
+      </button>
     </div>
   );
 }
 
 // Group component (recursive for nesting)
-function GroupItem(props: { group: GroupNode; depth?: number }) {
+function GroupItem(props: {
+  group: GroupNode;
+  depth?: number;
+  onEditSession: (session: Session) => void;
+  onEditGroup: (group: Group) => void;
+}) {
   const depth = props.depth || 0;
   const paddingLeft = `${depth * 12 + 8}px`;
+
+  const handleEditGroup = (e: MouseEvent) => {
+    e.stopPropagation();
+    props.onEditGroup(props.group);
+  };
 
   return (
     <div class="select-none">
       {/* Group header */}
       <div
-        class="flex items-center gap-2 px-2 py-1.5 cursor-pointer hover:bg-gray-700 rounded-md text-gray-400"
+        class="group flex items-center gap-2 px-2 py-1.5 cursor-pointer hover:bg-gray-700 rounded-md text-gray-400"
         style={{ "padding-left": paddingLeft }}
         onClick={() => appStore.toggleGroupCollapse(props.group.id)}
       >
         <svg
-          class={`w-4 h-4 transition-transform ${
+          class={`w-4 h-4 flex-shrink-0 transition-transform ${
             props.group.collapsed ? "" : "rotate-90"
           }`}
           fill="none"
@@ -68,7 +111,12 @@ function GroupItem(props: { group: GroupNode; depth?: number }) {
             d="M9 5l7 7-7 7"
           />
         </svg>
-        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <svg
+          class="w-4 h-4 flex-shrink-0"
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+        >
           <path
             stroke-linecap="round"
             stroke-linejoin="round"
@@ -79,21 +127,47 @@ function GroupItem(props: { group: GroupNode; depth?: number }) {
         <span class="truncate flex-1 text-sm font-medium">
           {props.group.name}
         </span>
-        <span class="text-xs text-gray-500">
+        <span class="text-xs text-gray-500 flex-shrink-0">
           {props.group.sessions.length + props.group.children.length}
         </span>
+        <button
+          class="p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-gray-600 transition-opacity"
+          onClick={handleEditGroup}
+          title="Edit group"
+        >
+          <svg
+            class="w-3.5 h-3.5"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"
+            />
+          </svg>
+        </button>
       </div>
 
       {/* Group contents (children and sessions) */}
       <Show when={!props.group.collapsed}>
         <div class="ml-2">
           <For each={props.group.children}>
-            {(child) => <GroupItem group={child} depth={depth + 1} />}
+            {(child) => (
+              <GroupItem
+                group={child}
+                depth={depth + 1}
+                onEditSession={props.onEditSession}
+                onEditGroup={props.onEditGroup}
+              />
+            )}
           </For>
           <For each={props.group.sessions}>
             {(session) => (
               <div style={{ "padding-left": `${(depth + 1) * 12}px` }}>
-                <SessionItem session={session} />
+                <SessionItem session={session} onEdit={props.onEditSession} />
               </div>
             )}
           </For>
@@ -109,6 +183,20 @@ export function Sidebar() {
   const [isNewSessionOpen, setIsNewSessionOpen] = createSignal(false);
   const [isNewGroupOpen, setIsNewGroupOpen] = createSignal(false);
   const [isSettingsOpen, setIsSettingsOpen] = createSignal(false);
+
+  // Edit dialog states
+  const [editingSession, setEditingSession] = createSignal<Session | null>(
+    null
+  );
+  const [editingGroup, setEditingGroup] = createSignal<Group | null>(null);
+
+  const handleEditSession = (session: Session) => {
+    setEditingSession(session);
+  };
+
+  const handleEditGroup = (group: Group) => {
+    setEditingGroup(group);
+  };
 
   return (
     <div class="w-64 bg-gray-800 border-r border-gray-700 flex flex-col h-full">
@@ -134,13 +222,23 @@ export function Sidebar() {
       {/* Session/Group list */}
       <div class="flex-1 overflow-y-auto p-2">
         {/* Render group tree */}
-        <For each={tree().roots}>{(group) => <GroupItem group={group} />}</For>
+        <For each={tree().roots}>
+          {(group) => (
+            <GroupItem
+              group={group}
+              onEditSession={handleEditSession}
+              onEditGroup={handleEditGroup}
+            />
+          )}
+        </For>
 
         {/* Render orphan sessions (not in any group) */}
         <Show when={tree().orphanSessions.length > 0}>
           <div class="mt-2 pt-2 border-t border-gray-700">
             <For each={tree().orphanSessions}>
-              {(session) => <SessionItem session={session} />}
+              {(session) => (
+                <SessionItem session={session} onEdit={handleEditSession} />
+              )}
             </For>
           </div>
         </Show>
@@ -238,6 +336,20 @@ export function Sidebar() {
       <NewGroupDialog
         isOpen={isNewGroupOpen()}
         onClose={() => setIsNewGroupOpen(false)}
+      />
+
+      {/* Edit Session Dialog */}
+      <EditSessionDialog
+        isOpen={editingSession() !== null}
+        onClose={() => setEditingSession(null)}
+        session={editingSession()}
+      />
+
+      {/* Edit Group Dialog */}
+      <EditGroupDialog
+        isOpen={editingGroup() !== null}
+        onClose={() => setEditingGroup(null)}
+        group={editingGroup()}
       />
 
       {/* Settings Modal */}

@@ -247,3 +247,74 @@ pub async fn delete_group(state: State<'_, DaemonState>, group_id: String) -> Re
         .and_then(|v| v.as_bool())
         .ok_or("Missing success field".to_string())
 }
+
+/// Update a session (name and/or group)
+/// For group_id: None = don't change, Some("") = remove from group, Some("uuid") = set group
+#[tauri::command]
+pub async fn update_session(
+    state: State<'_, DaemonState>,
+    session_id: String,
+    name: Option<String>,
+    group_id: Option<String>,
+) -> Result<Session, String> {
+    let session_uuid =
+        Uuid::parse_str(&session_id).map_err(|e| format!("Invalid session_id: {}", e))?;
+
+    // Convert: None = don't change, Some("") = remove group, Some("uuid") = set group
+    let group_uuid: Option<Option<Uuid>> = match group_id {
+        None => None, // Don't change
+        Some(ref id) if id.is_empty() => Some(None), // Remove from group
+        Some(id) => Some(Some(
+            Uuid::parse_str(&id).map_err(|e| format!("Invalid group_id: {}", e))?,
+        )),
+    };
+
+    let result = state
+        .client
+        .call(
+            "session.update",
+            json!({
+                "session_id": session_uuid,
+                "name": name,
+                "group_id": group_uuid,
+            }),
+        )
+        .await?;
+
+    serde_json::from_value(result).map_err(|e| e.to_string())
+}
+
+/// Update a group (name and/or parent)
+/// For parent_id: None = don't change, Some("") = make root, Some("uuid") = set parent
+#[tauri::command]
+pub async fn update_group(
+    state: State<'_, DaemonState>,
+    group_id: String,
+    name: Option<String>,
+    parent_id: Option<String>,
+) -> Result<Group, String> {
+    let group_uuid = Uuid::parse_str(&group_id).map_err(|e| format!("Invalid group_id: {}", e))?;
+
+    // Convert: None = don't change, Some("") = make root, Some("uuid") = set parent
+    let parent_uuid: Option<Option<Uuid>> = match parent_id {
+        None => None, // Don't change
+        Some(ref id) if id.is_empty() => Some(None), // Make root (no parent)
+        Some(id) => Some(Some(
+            Uuid::parse_str(&id).map_err(|e| format!("Invalid parent_id: {}", e))?,
+        )),
+    };
+
+    let result = state
+        .client
+        .call(
+            "group.update",
+            json!({
+                "group_id": group_uuid,
+                "name": name,
+                "parent_id": parent_uuid,
+            }),
+        )
+        .await?;
+
+    serde_json::from_value(result).map_err(|e| e.to_string())
+}

@@ -83,6 +83,20 @@ pub struct MoveToGroupParams {
     pub group_id: Option<Uuid>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateSessionParams {
+    pub session_id: Uuid,
+    pub name: Option<String>,
+    pub group_id: Option<Option<Uuid>>, // None = don't change, Some(None) = remove from group, Some(Some(id)) = set group
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateGroupParams {
+    pub group_id: Uuid,
+    pub name: Option<String>,
+    pub parent_id: Option<Option<Uuid>>, // None = don't change, Some(None) = make root, Some(Some(id)) = set parent
+}
+
 // --- Event Data ---
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
