@@ -1,8 +1,9 @@
 use anyhow::Result;
-use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::PathBuf;
+
+// Re-export shared path utilities
+pub use shared::{get_config_path, get_data_dir, get_socket_path, get_state_dir};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -54,28 +55,6 @@ impl Default for UiConfig {
             font_size: 14,
         }
     }
-}
-
-pub fn get_data_dir() -> Result<PathBuf> {
-    let proj_dirs = ProjectDirs::from("com", "agentdeck", "agent-deck")
-        .ok_or_else(|| anyhow::anyhow!("Could not determine data directory"))?;
-    let data_dir = proj_dirs.data_dir().to_path_buf();
-    fs::create_dir_all(&data_dir)?;
-    Ok(data_dir)
-}
-
-pub fn get_config_path() -> Result<PathBuf> {
-    Ok(get_data_dir()?.join("config.toml"))
-}
-
-pub fn get_state_dir() -> Result<PathBuf> {
-    let state_dir = get_data_dir()?.join("state");
-    fs::create_dir_all(&state_dir)?;
-    Ok(state_dir)
-}
-
-pub fn get_socket_path() -> Result<PathBuf> {
-    Ok(get_data_dir()?.join("daemon.sock"))
 }
 
 pub fn load_config() -> Result<Config> {

@@ -181,6 +181,68 @@ impl SessionManager {
         Ok(())
     }
 
+    pub async fn fork_session(
+        state: &SharedState,
+        pty_manager: &PtyManager,
+        output_tx: mpsc::Sender<(Uuid, Vec<u8>)>,
+        event_tx: &broadcast::Sender<Event>,
+        source_session_id: Uuid,
+        new_name: Option<String>,
+        new_group_id: Option<Uuid>,
+    ) -> Result<Session> {
+        // Get source session info
+        let (working_dir, claude_session_id, group_id, source_name) = {
+            let s = state.read().await;
+            let source = s.sessions.get(&source_session_id)
+                .ok_or_else(|| anyhow::anyhow!("Source session not found"))?;
+
+            let claude_id = source.claude_session_id.clone()
+                .ok_or_else(|| anyhow::anyhow!("Source session has no Claude session ID - cannot fork"))?;
+
+            (source.working_dir.clone(), claude_id, source.group_id, source.name.clone())
+        };
+
+        // Create new session with forked name
+        let name = new_name.unwrap_or_else(|| format!("{} (Fork)", source_name));
+
+        let mut session = Session::new(name, working_dir.clone(), new_group_id.or(group_id));
+
+        // Spawn PTY with --resume flag
+        pty_manager
+            .spawn_with_resume(
+                session.id,
+                &working_dir,
+                24,
+                80,
+                output_tx,
+                Some(&claude_session_id),
+            )
+            .await?;
+
+        session.status = SessionStatus::Running;
+        session.claude_session_id = Some(claude_session_id);
+        session.last_activity = Utc::now();
+
+        // Save to state
+        {
+            let mut s = state.write().await;
+            s.sessions.insert(session.id, session.clone());
+        }
+        save_state(state).await?;
+
+        // Emit event
+        let event = Event {
+            event: "session.created".to_string(),
+            data: serde_json::to_value(&session)?,
+        };
+        let _ = event_tx.send(event);
+
+        info!("Forked session {} from {} with Claude session {}",
+              session.id, source_session_id, session.claude_session_id.as_ref().unwrap());
+
+        Ok(session)
+    }
+
     pub async fn delete_session(
         state: &SharedState,
         pty_manager: &PtyManager,

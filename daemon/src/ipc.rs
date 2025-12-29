@@ -5,8 +5,8 @@ use interprocess::local_socket::{
     GenericFilePath, ListenerOptions,
 };
 use shared::{
-    CreateGroupParams, CreateSessionParams, ErrorInfo, Event, Request, Response,
-    SessionIdParams, SessionInputParams, SessionResizeParams,
+    CreateGroupParams, CreateSessionParams, ErrorInfo, Event, ForkSessionParams, Request,
+    Response, SessionIdParams, SessionInputParams, SessionResizeParams,
 };
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -331,6 +331,48 @@ async fn process_request(line: &str, ctx: &IpcContext) -> Response {
                     error: Some(ErrorInfo {
                         code: -32000,
                         message: format!("Failed to resize session: {}", e),
+                    }),
+                },
+            }
+        }
+
+        "session.fork" => {
+            let params: ForkSessionParams = match serde_json::from_value(request.params) {
+                Ok(p) => p,
+                Err(e) => {
+                    return Response {
+                        id: request.id,
+                        result: None,
+                        error: Some(ErrorInfo {
+                            code: -32602,
+                            message: format!("Invalid params: {}", e),
+                        }),
+                    };
+                }
+            };
+
+            match SessionManager::fork_session(
+                &ctx.state,
+                &ctx.pty_manager,
+                ctx.output_tx.clone(),
+                &ctx.event_tx,
+                params.session_id,
+                params.new_name,
+                params.group_id,
+            )
+            .await
+            {
+                Ok(session) => Response {
+                    id: request.id,
+                    result: Some(serde_json::json!({"session": session})),
+                    error: None,
+                },
+                Err(e) => Response {
+                    id: request.id,
+                    result: None,
+                    error: Some(ErrorInfo {
+                        code: -32000,
+                        message: format!("Failed to fork session: {}", e),
                     }),
                 },
             }

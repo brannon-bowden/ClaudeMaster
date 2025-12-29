@@ -33,6 +33,18 @@ impl PtyManager {
         cols: u16,
         output_tx: mpsc::Sender<(Uuid, Vec<u8>)>,
     ) -> Result<()> {
+        self.spawn_with_resume(session_id, working_dir, rows, cols, output_tx, None).await
+    }
+
+    pub async fn spawn_with_resume(
+        &self,
+        session_id: Uuid,
+        working_dir: &Path,
+        rows: u16,
+        cols: u16,
+        output_tx: mpsc::Sender<(Uuid, Vec<u8>)>,
+        resume_session_id: Option<&str>,
+    ) -> Result<()> {
         let pty_system = native_pty_system();
 
         let pair = pty_system.openpty(PtySize {
@@ -44,6 +56,12 @@ impl PtyManager {
 
         let mut cmd = CommandBuilder::new("claude");
         cmd.cwd(working_dir);
+
+        // Add --resume flag if forking from existing session
+        if let Some(claude_session_id) = resume_session_id {
+            cmd.arg("--resume");
+            cmd.arg(claude_session_id);
+        }
 
         let child = pair.slave.spawn_command(cmd)?;
 

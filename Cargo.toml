@@ -6,7 +6,7 @@ members = ["daemon", "shared", "gui/src-tauri"]
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
-repository = "https://github.com/yourusername/agent-deck"
+repository = "https://github.com/brannon-bowden/ClaudeMaster"
 
 [workspace.dependencies]
 tokio = { version = "1", features = ["full"] }

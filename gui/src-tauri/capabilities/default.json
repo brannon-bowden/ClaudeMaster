@@ -1,0 +1,11 @@
+{
+  "$schema": "https://schemas.tauri.app/capabilities/2.0.0/schema.json",
+  "identifier": "default",
+  "description": "Default capabilities for Agent Deck",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "shell:allow-open",
+    "dialog:allow-open"
+  ]
+}

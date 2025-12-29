@@ -16,7 +16,11 @@
         "width": 1200,
         "height": 800,
         "minWidth": 800,
-        "minHeight": 600
+        "minHeight": 600,
+        "decorations": true,
+        "transparent": false,
+        "resizable": true,
+        "fullscreen": false
       }
     ],
     "security": {
@@ -32,6 +36,38 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "category": "DeveloperTool",
+    "shortDescription": "Multi-session Claude Code manager",
+    "longDescription": "Agent Deck is a native desktop application for managing multiple Claude Code sessions simultaneously. Features include session forking, nested grouping, and real-time PTY output.",
+    "copyright": "Copyright 2025",
+    "macOS": {
+      "entitlements": null,
+      "exceptionDomain": null,
+      "frameworks": [],
+      "minimumSystemVersion": "10.15",
+      "providerShortName": null,
+      "signingIdentity": null
+    },
+    "windows": {
+      "certificateThumbprint": null,
+      "digestAlgorithm": "sha256",
+      "timestampUrl": null,
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper",
+        "silent": true
+      }
+    },
+    "linux": {
+      "appimage": {
+        "bundleMediaFramework": false
+      },
+      "deb": {
+        "depends": []
+      },
+      "rpm": {
+        "depends": []
+      }
+    }
   }
 }
