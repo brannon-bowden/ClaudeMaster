@@ -1,5 +1,6 @@
 mod config;
 mod ipc;
+mod pty;
 mod state;
 
 use anyhow::Result;
