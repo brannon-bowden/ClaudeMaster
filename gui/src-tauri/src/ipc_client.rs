@@ -105,10 +105,7 @@ impl IpcClient {
             Err(_) => {
                 // Timeout - disconnect and return error
                 self.disconnect().await;
-                Err(format!(
-                    "Request timed out after {}s",
-                    REQUEST_TIMEOUT_SECS
-                ))
+                Err(format!("Request timed out after {}s", REQUEST_TIMEOUT_SECS))
             }
         }
     }

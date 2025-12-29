@@ -16,15 +16,15 @@ impl StatusDetector {
     fn new() -> Self {
         Self {
             waiting_patterns: vec![
-                Regex::new(r"^>\s*$").unwrap(),                    // Claude's input prompt
-                Regex::new(r"╭─+╮\s*$").unwrap(),                  // Response box closed
-                Regex::new(r"\?\s*\[Y/n\]").unwrap(),              // Yes/No prompt
-                Regex::new(r"\?\s*\[y/N\]").unwrap(),              // No/Yes prompt
-                Regex::new(r"Press Enter to continue").unwrap(),  // Pause prompt
-                Regex::new(r"Would you like to").unwrap(),        // Action prompt
+                Regex::new(r"^>\s*$").unwrap(),       // Claude's input prompt
+                Regex::new(r"╭─+╮\s*$").unwrap(),     // Response box closed
+                Regex::new(r"\?\s*\[Y/n\]").unwrap(), // Yes/No prompt
+                Regex::new(r"\?\s*\[y/N\]").unwrap(), // No/Yes prompt
+                Regex::new(r"Press Enter to continue").unwrap(), // Pause prompt
+                Regex::new(r"Would you like to").unwrap(), // Action prompt
             ],
             running_patterns: vec![
-                Regex::new(r"[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]").unwrap(),           // Spinner characters
+                Regex::new(r"[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]").unwrap(), // Spinner characters
                 Regex::new(r"Thinking\.\.\.").unwrap(),
                 Regex::new(r"Reading .+\.\.\.").unwrap(),
                 Regex::new(r"Writing .+\.\.\.").unwrap(),
@@ -81,6 +81,7 @@ impl StatusDetector {
 }
 
 /// Get the global status detector
+#[allow(dead_code)]
 pub fn detector() -> &'static StatusDetector {
     &DETECTOR
 }
@@ -108,13 +109,22 @@ mod tests {
     #[test]
     fn test_detect_running() {
         assert_eq!(detect_status("⠋ Thinking..."), Some(SessionStatus::Running));
-        assert_eq!(detect_status("Reading file.rs..."), Some(SessionStatus::Running));
+        assert_eq!(
+            detect_status("Reading file.rs..."),
+            Some(SessionStatus::Running)
+        );
     }
 
     #[test]
     fn test_detect_error() {
-        assert_eq!(detect_status("Error: something went wrong"), Some(SessionStatus::Error));
-        assert_eq!(detect_status("APIError: rate limited"), Some(SessionStatus::Error));
+        assert_eq!(
+            detect_status("Error: something went wrong"),
+            Some(SessionStatus::Error)
+        );
+        assert_eq!(
+            detect_status("APIError: rate limited"),
+            Some(SessionStatus::Error)
+        );
     }
 
     #[test]

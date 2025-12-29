@@ -33,7 +33,8 @@ impl PtyManager {
         cols: u16,
         output_tx: mpsc::Sender<(Uuid, Vec<u8>)>,
     ) -> Result<()> {
-        self.spawn_with_resume(session_id, working_dir, rows, cols, output_tx, None).await
+        self.spawn_with_resume(session_id, working_dir, rows, cols, output_tx, None)
+            .await
     }
 
     pub async fn spawn_with_resume(
@@ -86,7 +87,11 @@ impl PtyManager {
                 match reader.read(&mut buf) {
                     Ok(0) => break,
                     Ok(n) => {
-                        if output_tx.send((session_id, buf[..n].to_vec())).await.is_err() {
+                        if output_tx
+                            .send((session_id, buf[..n].to_vec()))
+                            .await
+                            .is_err()
+                        {
                             break;
                         }
                     }

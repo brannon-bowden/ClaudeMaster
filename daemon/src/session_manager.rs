@@ -20,7 +20,10 @@ pub struct SessionManager {
 }
 
 impl SessionManager {
-    pub fn new(state: SharedState, event_tx: broadcast::Sender<Event>) -> (Self, mpsc::Receiver<(Uuid, Vec<u8>)>) {
+    pub fn new(
+        state: SharedState,
+        event_tx: broadcast::Sender<Event>,
+    ) -> (Self, mpsc::Receiver<(Uuid, Vec<u8>)>) {
         let (output_tx, output_rx) = mpsc::channel(1000);
         let manager = Self {
             state,
@@ -45,18 +48,15 @@ impl SessionManager {
 
             // Extract Claude session ID if present
             if let Some(claude_session_id) = claude::extract_session_id(&text) {
-                self.update_claude_session_id(session_id, claude_session_id).await;
+                self.update_claude_session_id(session_id, claude_session_id)
+                    .await;
             }
 
             // Forward output as event
             let output = BASE64.encode(&data);
             let event = Event {
                 event: "pty.output".to_string(),
-                data: serde_json::to_value(PtyOutputData {
-                    session_id,
-                    output,
-                })
-                .unwrap(),
+                data: serde_json::to_value(PtyOutputData { session_id, output }).unwrap(),
             };
             let _ = self.event_tx.send(event);
         }
@@ -68,7 +68,10 @@ impl SessionManager {
             let mut s = self.state.write().await;
             if let Some(session) = s.sessions.get_mut(&session_id) {
                 if session.status != new_status {
-                    debug!("Session {} status: {:?} -> {:?}", session_id, session.status, new_status);
+                    debug!(
+                        "Session {} status: {:?} -> {:?}",
+                        session_id, session.status, new_status
+                    );
                     session.status = new_status;
                     session.last_activity = Utc::now();
                     status_changed = true;
@@ -94,7 +97,10 @@ impl SessionManager {
         let mut s = self.state.write().await;
         if let Some(session) = s.sessions.get_mut(&session_id) {
             if session.claude_session_id.as_ref() != Some(&claude_session_id) {
-                debug!("Session {} claude_session_id: {:?}", session_id, claude_session_id);
+                debug!(
+                    "Session {} claude_session_id: {:?}",
+                    session_id, claude_session_id
+                );
                 session.claude_session_id = Some(claude_session_id);
             }
         }
@@ -108,10 +114,12 @@ impl SessionManager {
         self.output_tx.clone()
     }
 
+    #[allow(dead_code)]
     pub fn state(&self) -> SharedState {
         self.state.clone()
     }
 
+    #[allow(dead_code)]
     pub fn event_tx(&self) -> broadcast::Sender<Event> {
         self.event_tx.clone()
     }
@@ -193,13 +201,21 @@ impl SessionManager {
         // Get source session info
         let (working_dir, claude_session_id, group_id, source_name) = {
             let s = state.read().await;
-            let source = s.sessions.get(&source_session_id)
+            let source = s
+                .sessions
+                .get(&source_session_id)
                 .ok_or_else(|| anyhow::anyhow!("Source session not found"))?;
 
-            let claude_id = source.claude_session_id.clone()
-                .ok_or_else(|| anyhow::anyhow!("Source session has no Claude session ID - cannot fork"))?;
+            let claude_id = source.claude_session_id.clone().ok_or_else(|| {
+                anyhow::anyhow!("Source session has no Claude session ID - cannot fork")
+            })?;
 
-            (source.working_dir.clone(), claude_id, source.group_id, source.name.clone())
+            (
+                source.working_dir.clone(),
+                claude_id,
+                source.group_id,
+                source.name.clone(),
+            )
         };
 
         // Create new session with forked name
@@ -237,8 +253,12 @@ impl SessionManager {
         };
         let _ = event_tx.send(event);
 
-        info!("Forked session {} from {} with Claude session {}",
-              session.id, source_session_id, session.claude_session_id.as_ref().unwrap());
+        info!(
+            "Forked session {} from {} with Claude session {}",
+            session.id,
+            source_session_id,
+            session.claude_session_id.as_ref().unwrap()
+        );
 
         Ok(session)
     }

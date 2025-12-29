@@ -3,9 +3,9 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 
 // Re-export shared path utilities
-pub use shared::{get_config_path, get_data_dir, get_socket_path, get_state_dir};
+pub use shared::{get_config_path, get_socket_path, get_state_dir};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct Config {
     pub daemon: DaemonConfig,
@@ -26,15 +26,6 @@ pub struct UiConfig {
     pub theme: String,
     pub font_family: String,
     pub font_size: u16,
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            daemon: DaemonConfig::default(),
-            ui: UiConfig::default(),
-        }
-    }
 }
 
 impl Default for DaemonConfig {

@@ -5,8 +5,8 @@ use interprocess::local_socket::{
     GenericFilePath, ListenerOptions,
 };
 use shared::{
-    CreateGroupParams, CreateSessionParams, ErrorInfo, Event, ForkSessionParams, Request,
-    Response, SessionIdParams, SessionInputParams, SessionResizeParams,
+    CreateGroupParams, CreateSessionParams, ErrorInfo, Event, ForkSessionParams, Request, Response,
+    SessionIdParams, SessionInputParams, SessionResizeParams,
 };
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -403,8 +403,13 @@ async fn process_request(line: &str, ctx: &IpcContext) -> Response {
                 }
             };
 
-            match SessionManager::create_group(&ctx.state, &ctx.event_tx, params.name, params.parent_id)
-                .await
+            match SessionManager::create_group(
+                &ctx.state,
+                &ctx.event_tx,
+                params.name,
+                params.parent_id,
+            )
+            .await
             {
                 Ok(group) => Response {
                     id: request.id,

@@ -62,7 +62,10 @@ pub async fn create_session(
         )
         .await?;
 
-    let session = result.get("session").ok_or("Missing session field")?.clone();
+    let session = result
+        .get("session")
+        .ok_or("Missing session field")?
+        .clone();
     serde_json::from_value(session).map_err(|e| e.to_string())
 }
 
@@ -132,7 +135,10 @@ pub async fn fork_session(
         )
         .await?;
 
-    let session = result.get("session").ok_or("Missing session field")?.clone();
+    let session = result
+        .get("session")
+        .ok_or("Missing session field")?
+        .clone();
     serde_json::from_value(session).map_err(|e| e.to_string())
 }
 
@@ -227,10 +233,7 @@ pub async fn create_group(
 
 /// Delete a group
 #[tauri::command]
-pub async fn delete_group(
-    state: State<'_, DaemonState>,
-    group_id: String,
-) -> Result<bool, String> {
+pub async fn delete_group(state: State<'_, DaemonState>, group_id: String) -> Result<bool, String> {
     let uuid = Uuid::parse_str(&group_id).map_err(|e| format!("Invalid group_id: {}", e))?;
 
     // Note: the daemon uses session_id field for group_id in delete

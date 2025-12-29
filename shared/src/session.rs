@@ -3,20 +3,15 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use uuid::Uuid;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum SessionStatus {
     Running,
     Waiting,
     Idle,
     Error,
+    #[default]
     Stopped,
-}
-
-impl Default for SessionStatus {
-    fn default() -> Self {
-        Self::Stopped
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
