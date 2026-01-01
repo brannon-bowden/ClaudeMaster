@@ -11,7 +11,7 @@
     "tauri:dev": "npm run sidecar:build && tauri dev",
     "tauri:build": "npm run sidecar:build && tauri build",
     "tauri:build:debug": "npm run sidecar:build && tauri build --debug",
-    "sidecar:build": "cd src-tauri && ./build-sidecar.sh",
+    "sidecar:build": "node src-tauri/build-sidecar.mjs",
     "daemon:build": "cd .. && cargo build -p claude-master-daemon --release",
     "daemon:dev": "cd .. && cargo run -p claude-master-daemon",
     "build:all": "npm run tauri:build"
