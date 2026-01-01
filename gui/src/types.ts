@@ -1,11 +1,12 @@
 // Types matching the Rust shared crate
 
+// Must match Rust enum with #[serde(rename_all = "lowercase")]
 export type SessionStatus =
-  | "Stopped"
-  | "Running"
-  | "Waiting"
-  | "Error"
-  | "Completed";
+  | "stopped"
+  | "running"
+  | "waiting"
+  | "error"
+  | "idle";
 
 export interface Session {
   id: string;

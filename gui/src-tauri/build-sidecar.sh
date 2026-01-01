@@ -27,16 +27,16 @@ echo "Building daemon for target: $TARGET"
 
 # Build daemon
 cd "$PROJECT_ROOT"
-cargo build -p agent-deck-daemon --release
+cargo build -p claude-master-daemon --release
 
 # Create binaries directory
 mkdir -p "$SCRIPT_DIR/binaries"
 
 # Copy binary with target suffix (Tauri convention)
 if [[ "$OSTYPE" == "msys" ]] || [[ "$OSTYPE" == "cygwin" ]] || [[ "$OSTYPE" == "win32" ]]; then
-    cp "$PROJECT_ROOT/target/release/agent-deck-daemon.exe" "$SCRIPT_DIR/binaries/agent-deck-daemon-$TARGET.exe"
+    cp "$PROJECT_ROOT/target/release/claude-master-daemon.exe" "$SCRIPT_DIR/binaries/claude-master-daemon-$TARGET.exe"
 else
-    cp "$PROJECT_ROOT/target/release/agent-deck-daemon" "$SCRIPT_DIR/binaries/agent-deck-daemon-$TARGET"
+    cp "$PROJECT_ROOT/target/release/claude-master-daemon" "$SCRIPT_DIR/binaries/claude-master-daemon-$TARGET"
 fi
 
-echo "Sidecar binary copied to: $SCRIPT_DIR/binaries/agent-deck-daemon-$TARGET"
+echo "Sidecar binary copied to: $SCRIPT_DIR/binaries/claude-master-daemon-$TARGET"

@@ -33,7 +33,16 @@ impl IpcClient {
     }
 
     /// Connect to the daemon socket
+    /// This is idempotent - calling it when already connected is a no-op
     pub async fn connect(&self) -> Result<(), String> {
+        // Check if already connected
+        {
+            let writer_guard = self.writer.lock().await;
+            if writer_guard.is_some() {
+                return Ok(()); // Already connected
+            }
+        }
+
         let socket_path = get_socket_path().map_err(|e| e.to_string())?;
 
         if !socket_path.exists() {
@@ -82,22 +91,40 @@ impl IpcClient {
     }
 
     /// Send a request and wait for the response with timeout
+    /// Auto-reconnects if not connected
     pub async fn call(&self, method: &str, params: Value) -> Result<Value, String> {
+        // Auto-reconnect if not connected
+        if !self.is_connected().await {
+            self.connect().await?;
+        }
+
         let result = timeout(
             Duration::from_secs(REQUEST_TIMEOUT_SECS),
-            self.call_inner(method, params),
+            self.call_inner(method, params.clone()),
         )
         .await;
 
         match result {
             Ok(inner_result) => {
-                // If there was a connection error, disconnect
+                // If there was a connection error, disconnect and retry once
                 if let Err(ref e) = inner_result {
                     if e.contains("Failed to send")
                         || e.contains("Failed to read")
                         || e.contains("Not connected")
+                        || e.contains("Connection closed")
                     {
                         self.disconnect().await;
+                        // Try to reconnect and retry once
+                        if self.connect().await.is_ok() {
+                            return timeout(
+                                Duration::from_secs(REQUEST_TIMEOUT_SECS),
+                                self.call_inner(method, params),
+                            )
+                            .await
+                            .map_err(|_| {
+                                format!("Request timed out after {}s", REQUEST_TIMEOUT_SECS)
+                            })?;
+                        }
                     }
                 }
                 inner_result

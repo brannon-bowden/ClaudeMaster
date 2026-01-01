@@ -1,10 +1,11 @@
 use anyhow::Result;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use shared::{Event, Group, PtyOutputData, Session, SessionStatus, StatusChangedData};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::sync::{broadcast, mpsc};
+use tokio::sync::{broadcast, mpsc, RwLock};
 use tracing::{debug, info};
 use uuid::Uuid;
 
@@ -12,12 +13,31 @@ use crate::claude;
 use crate::pty::PtyManager;
 use crate::state::{save_state, SharedState};
 
+/// Track pending status transitions for debouncing
+struct StatusDebounce {
+    /// When the current status was last confirmed (by seeing its indicator)
+    last_confirmed: DateTime<Utc>,
+    /// Pending transition: (new_status, first_seen_at)
+    pending: Option<(SessionStatus, DateTime<Utc>)>,
+}
+
 pub struct SessionManager {
     state: SharedState,
     pty_manager: Arc<PtyManager>,
     event_tx: broadcast::Sender<Event>,
     output_tx: mpsc::Sender<(Uuid, Vec<u8>)>,
+    /// Debounce state per session
+    debounce: Arc<RwLock<HashMap<Uuid, StatusDebounce>>>,
 }
+
+/// Minimum time (ms) a new status must be seen before transitioning
+/// This prevents flapping between states during rapid TUI updates
+#[allow(dead_code)]
+const STATUS_DEBOUNCE_MS: i64 = 500;
+
+/// Running status has a longer cooldown before transitioning to waiting
+/// This matches agent-deck's behavior where GREEN stays for ~2 seconds
+const RUNNING_COOLDOWN_MS: i64 = 2000;
 
 impl SessionManager {
     pub fn new(
@@ -30,6 +50,7 @@ impl SessionManager {
             pty_manager: Arc::new(PtyManager::new()),
             event_tx,
             output_tx,
+            debounce: Arc::new(RwLock::new(HashMap::new())),
         };
         (manager, output_rx)
     }
@@ -37,13 +58,33 @@ impl SessionManager {
     pub async fn run(self, mut output_rx: mpsc::Receiver<(Uuid, Vec<u8>)>) {
         info!("Session manager started");
 
+        // Spawn background task to check for waiting→idle transitions
+        let idle_state = self.state.clone();
+        let idle_event_tx = self.event_tx.clone();
+        tokio::spawn(async move {
+            Self::idle_checker(idle_state, idle_event_tx).await;
+        });
+
         while let Some((session_id, data)) = output_rx.recv().await {
             // Convert to string for status detection (lossy is fine for pattern matching)
             let text = String::from_utf8_lossy(&data);
 
-            // Detect status changes
-            if let Some(new_status) = claude::detect_status(&text) {
-                self.update_session_status(session_id, new_status).await;
+            // Debug: log a sample of the text for status detection debugging
+            let sample: String = text.chars().take(100).collect();
+            let printable_sample: String = sample
+                .chars()
+                .map(|c| if c.is_control() && c != '\n' { '.' } else { c })
+                .collect();
+            debug!(
+                "PTY output: {} bytes, sample: {:?}",
+                data.len(),
+                printable_sample
+            );
+
+            // Detect status changes with debouncing
+            if let Some(detected_status) = claude::detect_status(&text) {
+                self.handle_status_detection(session_id, detected_status)
+                    .await;
             }
 
             // Extract Claude session ID if present
@@ -63,6 +104,20 @@ impl SessionManager {
     }
 
     async fn update_session_status(&self, session_id: Uuid, new_status: SessionStatus) {
+        // First check with read lock to avoid write lock contention
+        let needs_update = {
+            let s = self.state.read().await;
+            s.sessions
+                .get(&session_id)
+                .map(|session| session.status != new_status)
+                .unwrap_or(false)
+        };
+
+        if !needs_update {
+            return;
+        }
+
+        // Only acquire write lock if we actually need to update
         let mut status_changed = false;
         {
             let mut s = self.state.write().await;
@@ -93,7 +148,119 @@ impl SessionManager {
         }
     }
 
+    /// Handle status detection with debouncing to prevent flapping
+    ///
+    /// This implements a cooldown-based approach similar to agent-deck:
+    /// - Transition TO Running is IMMEDIATE (user should see activity right away)
+    /// - Transition FROM Running has a 2 second cooldown (prevent flapping during TUI updates)
+    /// - This handles interleaved chunks where some have "esc to interrupt" and some don't
+    async fn handle_status_detection(&self, session_id: Uuid, detected_status: SessionStatus) {
+        let now = Utc::now();
+
+        // Get current session status
+        let current_status = {
+            let s = self.state.read().await;
+            s.sessions.get(&session_id).map(|s| s.status)
+        };
+
+        let Some(current_status) = current_status else {
+            return;
+        };
+
+        // Same status - just update last_confirmed but DON'T reset pending
+        // This is important: if we're Running and see Running, keep pending Waiting timer
+        // if we're Waiting and see Waiting, keep pending Running timer
+        if detected_status == current_status {
+            let mut debounce = self.debounce.write().await;
+            if let Some(state) = debounce.get_mut(&session_id) {
+                state.last_confirmed = now;
+                // NOTE: We intentionally don't reset pending here!
+                // Interleaved chunks shouldn't cancel pending transitions
+            }
+            return;
+        }
+
+        // IMMEDIATE transition TO Running - don't debounce
+        // User should see the "running" indicator as soon as Claude starts working
+        if detected_status == SessionStatus::Running {
+            debug!(
+                "Immediate transition to Running for {}: {:?} -> {:?}",
+                session_id, current_status, detected_status
+            );
+            let mut debounce = self.debounce.write().await;
+            if let Some(state) = debounce.get_mut(&session_id) {
+                state.last_confirmed = now;
+                state.pending = None;
+            }
+            drop(debounce);
+            self.update_session_status(session_id, detected_status)
+                .await;
+            return;
+        }
+
+        // Transition FROM Running requires cooldown (prevents flapping)
+        // Only apply debounce when leaving Running state
+        if current_status == SessionStatus::Running {
+            let mut debounce = self.debounce.write().await;
+            let state = debounce.entry(session_id).or_insert(StatusDebounce {
+                last_confirmed: now,
+                pending: None,
+            });
+
+            match &state.pending {
+                Some((pending_status, first_seen)) if *pending_status == detected_status => {
+                    // Same pending status - check if cooldown has passed
+                    let elapsed_ms = (now - *first_seen).num_milliseconds();
+
+                    if elapsed_ms >= RUNNING_COOLDOWN_MS {
+                        debug!(
+                            "Running cooldown complete for {}: Running -> {:?} (after {}ms)",
+                            session_id, detected_status, elapsed_ms
+                        );
+                        state.pending = None;
+                        state.last_confirmed = now;
+                        drop(debounce);
+                        self.update_session_status(session_id, detected_status)
+                            .await;
+                    }
+                    // Otherwise, keep waiting for cooldown
+                }
+                _ => {
+                    // Start cooldown timer for leaving Running
+                    debug!(
+                        "Starting Running cooldown for {}: Running -> {:?}",
+                        session_id, detected_status
+                    );
+                    state.pending = Some((detected_status, now));
+                }
+            }
+            return;
+        }
+
+        // Other transitions (not involving Running) - immediate
+        debug!(
+            "Immediate transition for {}: {:?} -> {:?}",
+            session_id, current_status, detected_status
+        );
+        self.update_session_status(session_id, detected_status)
+            .await;
+    }
+
     async fn update_claude_session_id(&self, session_id: Uuid, claude_session_id: String) {
+        // First check with read lock to avoid write lock contention
+        let needs_update = {
+            let s = self.state.read().await;
+            s.sessions
+                .get(&session_id)
+                .map(|session| session.claude_session_id.as_ref() != Some(&claude_session_id))
+                .unwrap_or(false)
+        };
+
+        if !needs_update {
+            return;
+        }
+
+        // Only acquire write lock if we actually need to update
         let mut s = self.state.write().await;
         if let Some(session) = s.sessions.get_mut(&session_id) {
             if session.claude_session_id.as_ref() != Some(&claude_session_id) {
@@ -102,6 +269,59 @@ impl SessionManager {
                     session_id, claude_session_id
                 );
                 session.claude_session_id = Some(claude_session_id);
+            }
+        }
+    }
+
+    /// Background task that checks for waiting→idle transitions
+    /// Sessions in "Waiting" status for more than IDLE_TIMEOUT become "Idle"
+    async fn idle_checker(state: SharedState, event_tx: broadcast::Sender<Event>) {
+        const IDLE_TIMEOUT_SECS: i64 = 60; // 1 minute of inactivity
+        const CHECK_INTERVAL_SECS: u64 = 10; // Check every 10 seconds
+
+        loop {
+            tokio::time::sleep(tokio::time::Duration::from_secs(CHECK_INTERVAL_SECS)).await;
+
+            let now = Utc::now();
+            let mut sessions_to_idle = Vec::new();
+
+            // Check with read lock first
+            {
+                let s = state.read().await;
+                for (id, session) in s.sessions.iter() {
+                    if session.status == SessionStatus::Waiting {
+                        let elapsed = now.signed_duration_since(session.last_activity);
+                        if elapsed.num_seconds() > IDLE_TIMEOUT_SECS {
+                            sessions_to_idle.push(*id);
+                        }
+                    }
+                }
+            }
+
+            // Update sessions that need to transition to Idle
+            for session_id in sessions_to_idle {
+                let mut s = state.write().await;
+                if let Some(session) = s.sessions.get_mut(&session_id) {
+                    // Double-check it's still waiting (might have changed)
+                    if session.status == SessionStatus::Waiting {
+                        debug!(
+                            "Session {} transitioning to Idle (inactive for >{}s)",
+                            session_id, IDLE_TIMEOUT_SECS
+                        );
+                        session.status = SessionStatus::Idle;
+
+                        // Emit status change event
+                        let event = Event {
+                            event: "session:status_changed".to_string(),
+                            data: serde_json::to_value(StatusChangedData {
+                                session_id,
+                                status: SessionStatus::Idle,
+                            })
+                            .unwrap(),
+                        };
+                        let _ = event_tx.send(event);
+                    }
+                }
             }
         }
     }
@@ -126,22 +346,17 @@ impl SessionManager {
 
     pub async fn create_session(
         state: &SharedState,
-        pty_manager: &PtyManager,
-        output_tx: mpsc::Sender<(Uuid, Vec<u8>)>,
+        _pty_manager: &PtyManager,
+        _output_tx: mpsc::Sender<(Uuid, Vec<u8>)>,
         event_tx: &broadcast::Sender<Event>,
         name: String,
         working_dir: PathBuf,
         group_id: Option<Uuid>,
     ) -> Result<Session> {
-        let mut session = Session::new(name, working_dir.clone(), group_id);
-
-        // Spawn PTY
-        pty_manager
-            .spawn(session.id, &working_dir, 24, 80, output_tx)
-            .await?;
-
-        session.status = SessionStatus::Running;
-        session.last_activity = Utc::now();
+        let session = Session::new(name, working_dir.clone(), group_id);
+        // Note: Session is created in "stopped" state by default
+        // The PTY is NOT spawned here - it will be spawned when the terminal
+        // is ready and calls restart_session with proper dimensions
 
         // Save to state
         {
@@ -189,6 +404,7 @@ impl SessionManager {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn fork_session(
         state: &SharedState,
         pty_manager: &PtyManager,
@@ -197,6 +413,8 @@ impl SessionManager {
         source_session_id: Uuid,
         new_name: Option<String>,
         new_group_id: Option<Uuid>,
+        rows: u16,
+        cols: u16,
     ) -> Result<Session> {
         // Get source session info
         let (working_dir, claude_session_id, group_id, source_name) = {
@@ -223,13 +441,14 @@ impl SessionManager {
 
         let mut session = Session::new(name, working_dir.clone(), new_group_id.or(group_id));
 
-        // Spawn PTY with --resume flag
+        // Spawn PTY with --resume flag using provided dimensions
+        info!("Spawning forked PTY with size {}x{}", cols, rows);
         pty_manager
             .spawn_with_resume(
                 session.id,
                 &working_dir,
-                24,
-                80,
+                rows,
+                cols,
                 output_tx,
                 Some(&claude_session_id),
             )
@@ -259,6 +478,66 @@ impl SessionManager {
             source_session_id,
             session.claude_session_id.as_ref().unwrap()
         );
+
+        Ok(session)
+    }
+
+    pub async fn restart_session(
+        state: &SharedState,
+        pty_manager: &PtyManager,
+        output_tx: mpsc::Sender<(Uuid, Vec<u8>)>,
+        event_tx: &broadcast::Sender<Event>,
+        session_id: Uuid,
+        rows: u16,
+        cols: u16,
+    ) -> Result<Session> {
+        // Get session info
+        let working_dir = {
+            let s = state.read().await;
+            let session = s
+                .sessions
+                .get(&session_id)
+                .ok_or_else(|| anyhow::anyhow!("Session not found"))?;
+            session.working_dir.clone()
+        };
+
+        // Stop if running
+        if pty_manager.is_alive(session_id).await {
+            pty_manager.kill(session_id).await?;
+        }
+
+        // Spawn new PTY with specified dimensions
+        // This is critical - Claude Code checks terminal size at startup
+        // to decide whether to use full TUI mode with alternate screen buffer
+        info!("Spawning PTY with size {}x{}", cols, rows);
+        pty_manager
+            .spawn(session_id, &working_dir, rows, cols, output_tx)
+            .await?;
+
+        // Update session state
+        let session = {
+            let mut s = state.write().await;
+            let session = s
+                .sessions
+                .get_mut(&session_id)
+                .ok_or_else(|| anyhow::anyhow!("Session not found"))?;
+            session.status = SessionStatus::Running;
+            session.last_activity = Utc::now();
+            session.clone()
+        };
+        save_state(state).await?;
+
+        // Emit status changed event
+        let event = Event {
+            event: "session:status_changed".to_string(),
+            data: serde_json::to_value(StatusChangedData {
+                session_id,
+                status: SessionStatus::Running,
+            })?,
+        };
+        let _ = event_tx.send(event);
+
+        info!("Restarted session {}", session_id);
 
         Ok(session)
     }

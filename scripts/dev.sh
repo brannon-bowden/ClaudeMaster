@@ -1,5 +1,5 @@
 #!/bin/bash
-# Development script for Agent Deck
+# Development script for Claude Master
 # Starts both daemon and GUI in development mode
 
 set -e
@@ -30,7 +30,7 @@ trap cleanup SIGINT SIGTERM
 start_daemon() {
     log_info "Starting daemon..."
     cd "$PROJECT_ROOT"
-    RUST_LOG=info cargo run -p agent-deck-daemon &
+    RUST_LOG=info cargo run -p claude-master-daemon &
     DAEMON_PID=$!
     log_info "Daemon started (PID: $DAEMON_PID)"
 
@@ -53,7 +53,7 @@ start_gui() {
 }
 
 main() {
-    log_info "Starting Agent Deck in development mode..."
+    log_info "Starting Claude Master in development mode..."
     start_daemon
     start_gui
 }

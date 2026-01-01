@@ -1,5 +1,5 @@
 #!/bin/bash
-# Build script for Agent Deck
+# Build script for Claude Master
 # Usage: ./scripts/build.sh [daemon|gui|all] [debug|release]
 
 set -e
@@ -57,9 +57,9 @@ build_daemon() {
     cd "$PROJECT_ROOT"
 
     if [ "$BUILD_TYPE" = "release" ]; then
-        cargo build -p agent-deck-daemon --release
+        cargo build -p claude-master-daemon --release
     else
-        cargo build -p agent-deck-daemon
+        cargo build -p claude-master-daemon
     fi
 
     log_info "Daemon build complete"
@@ -115,9 +115,9 @@ main() {
 
     if [ "$TARGET" = "daemon" ] || [ "$TARGET" = "all" ]; then
         if [ "$BUILD_TYPE" = "release" ]; then
-            echo "  Daemon: $PROJECT_ROOT/target/release/agent-deck-daemon"
+            echo "  Daemon: $PROJECT_ROOT/target/release/claude-master-daemon"
         else
-            echo "  Daemon: $PROJECT_ROOT/target/debug/agent-deck-daemon"
+            echo "  Daemon: $PROJECT_ROOT/target/debug/claude-master-daemon"
         fi
     fi
 

@@ -99,6 +99,10 @@ async fn run_event_loop(app: &AppHandle) -> Result<(), String> {
             Ok(_) => {
                 // Try to parse as Event
                 if let Ok(event) = serde_json::from_str::<Event>(&line) {
+                    // Log PTY output events (truncated)
+                    if event.event == "pty:output" {
+                        info!("Forwarding pty:output event to frontend");
+                    }
                     // Emit to frontend
                     if let Err(e) = app.emit(&event.event, &event.data) {
                         error!("Failed to emit event: {}", e);

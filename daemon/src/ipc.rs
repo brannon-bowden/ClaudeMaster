@@ -5,10 +5,13 @@ use interprocess::local_socket::{
     GenericFilePath, ListenerOptions,
 };
 use shared::{
-    CreateGroupParams, CreateSessionParams, ErrorInfo, Event, ForkSessionParams, Request, Response,
-    SessionIdParams, SessionInputParams, SessionResizeParams, UpdateGroupParams, UpdateSessionParams,
+    CreateGroupParams, CreateSessionParams, ErrorInfo, Event, ForkSessionParams,
+    ReorderGroupParams, ReorderSessionParams, Request, Response, SessionIdParams,
+    SessionInputParams, SessionResizeParams, SessionRestartParams, UpdateGroupParams,
+    UpdateSessionParams,
 };
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::{broadcast, mpsc};
@@ -26,6 +29,7 @@ pub struct IpcContext {
     pub pty_manager: Arc<PtyManager>,
     pub output_tx: mpsc::Sender<(Uuid, Vec<u8>)>,
     pub event_tx: EventSender,
+    pub shutdown_flag: Arc<AtomicBool>,
 }
 
 pub async fn start_server(socket_path: &Path, ctx: Arc<IpcContext>) -> Result<()> {
@@ -40,6 +44,12 @@ pub async fn start_server(socket_path: &Path, ctx: Arc<IpcContext>) -> Result<()
     info!("IPC server listening on {:?}", socket_path);
 
     loop {
+        // Check shutdown flag
+        if ctx.shutdown_flag.load(Ordering::Relaxed) {
+            info!("Shutdown requested, stopping IPC server");
+            break;
+        }
+
         match listener.accept().await {
             Ok(stream) => {
                 let ctx = ctx.clone();
@@ -54,6 +64,8 @@ pub async fn start_server(socket_path: &Path, ctx: Arc<IpcContext>) -> Result<()
             }
         }
     }
+
+    Ok(())
 }
 
 async fn handle_connection(stream: Stream, ctx: Arc<IpcContext>) -> Result<()> {
@@ -115,6 +127,7 @@ async fn process_request(line: &str, ctx: &IpcContext) -> Response {
     let request: Request = match serde_json::from_str(line.trim()) {
         Ok(r) => r,
         Err(e) => {
+            error!("IPC parse error: {}", e);
             return Response {
                 id: 0,
                 result: None,
@@ -126,12 +139,24 @@ async fn process_request(line: &str, ctx: &IpcContext) -> Response {
         }
     };
 
+    info!("IPC request: {} (id={})", request.method, request.id);
+
     match request.method.as_str() {
         "daemon.ping" => Response {
             id: request.id,
             result: Some(serde_json::json!({"status": "ok"})),
             error: None,
         },
+
+        "daemon.shutdown" => {
+            info!("Shutdown requested via IPC");
+            ctx.shutdown_flag.store(true, Ordering::Relaxed);
+            Response {
+                id: request.id,
+                result: Some(serde_json::json!({"status": "shutting_down"})),
+                error: None,
+            }
+        }
 
         "session.list" => {
             let s = ctx.state.read().await;
@@ -144,9 +169,11 @@ async fn process_request(line: &str, ctx: &IpcContext) -> Response {
         }
 
         "session.create" => {
+            info!("Processing session.create request");
             let params: CreateSessionParams = match serde_json::from_value(request.params) {
                 Ok(p) => p,
                 Err(e) => {
+                    error!("session.create invalid params: {}", e);
                     return Response {
                         id: request.id,
                         result: None,
@@ -158,6 +185,7 @@ async fn process_request(line: &str, ctx: &IpcContext) -> Response {
                 }
             };
 
+            info!("session.create: name={} dir={}", params.name, params.dir);
             match SessionManager::create_session(
                 &ctx.state,
                 &ctx.pty_manager,
@@ -376,6 +404,54 @@ async fn process_request(line: &str, ctx: &IpcContext) -> Response {
             }
         }
 
+        "session.restart" => {
+            info!("Processing session.restart request");
+            let params: SessionRestartParams = match serde_json::from_value(request.params) {
+                Ok(p) => p,
+                Err(e) => {
+                    error!("session.restart invalid params: {}", e);
+                    return Response {
+                        id: request.id,
+                        result: None,
+                        error: Some(ErrorInfo {
+                            code: -32602,
+                            message: format!("Invalid params: {}", e),
+                        }),
+                    };
+                }
+            };
+
+            info!(
+                "session.restart for session_id: {} with size {}x{}",
+                params.session_id, params.cols, params.rows
+            );
+            match SessionManager::restart_session(
+                &ctx.state,
+                &ctx.pty_manager,
+                ctx.output_tx.clone(),
+                &ctx.event_tx,
+                params.session_id,
+                params.rows,
+                params.cols,
+            )
+            .await
+            {
+                Ok(session) => Response {
+                    id: request.id,
+                    result: Some(serde_json::json!({"session": session})),
+                    error: None,
+                },
+                Err(e) => Response {
+                    id: request.id,
+                    result: None,
+                    error: Some(ErrorInfo {
+                        code: -32000,
+                        message: format!("Failed to restart session: {}", e),
+                    }),
+                },
+            }
+        }
+
         "session.fork" => {
             let params: ForkSessionParams = match serde_json::from_value(request.params) {
                 Ok(p) => p,
@@ -391,6 +467,10 @@ async fn process_request(line: &str, ctx: &IpcContext) -> Response {
                 }
             };
 
+            info!(
+                "session.fork for session_id: {} with size {}x{}",
+                params.session_id, params.cols, params.rows
+            );
             match SessionManager::fork_session(
                 &ctx.state,
                 &ctx.pty_manager,
@@ -399,6 +479,8 @@ async fn process_request(line: &str, ctx: &IpcContext) -> Response {
                 params.session_id,
                 params.new_name,
                 params.group_id,
+                params.rows,
+                params.cols,
             )
             .await
             {
@@ -535,6 +617,106 @@ async fn process_request(line: &str, ctx: &IpcContext) -> Response {
                     error: Some(ErrorInfo {
                         code: -32000,
                         message: format!("Failed to update group: {}", e),
+                    }),
+                },
+            }
+        }
+
+        "session.reorder" => {
+            let params: ReorderSessionParams = match serde_json::from_value(request.params) {
+                Ok(p) => p,
+                Err(e) => {
+                    return Response {
+                        id: request.id,
+                        result: None,
+                        error: Some(ErrorInfo {
+                            code: -32602,
+                            message: format!("Invalid params: {}", e),
+                        }),
+                    };
+                }
+            };
+
+            match crate::state::reorder_session(
+                &ctx.state,
+                params.session_id,
+                params.group_id,
+                params.after_session_id,
+            )
+            .await
+            {
+                Ok(session) => {
+                    // Save state after reorder
+                    if let Err(e) = crate::state::save_state(&ctx.state).await {
+                        error!("Failed to save state after session reorder: {}", e);
+                    }
+                    // Emit event so UI updates
+                    let _ = ctx.event_tx.send(Event {
+                        event: "session:updated".to_string(),
+                        data: serde_json::to_value(&session).unwrap(),
+                    });
+                    Response {
+                        id: request.id,
+                        result: Some(serde_json::to_value(&session).unwrap()),
+                        error: None,
+                    }
+                }
+                Err(e) => Response {
+                    id: request.id,
+                    result: None,
+                    error: Some(ErrorInfo {
+                        code: -32000,
+                        message: format!("Failed to reorder session: {}", e),
+                    }),
+                },
+            }
+        }
+
+        "group.reorder" => {
+            let params: ReorderGroupParams = match serde_json::from_value(request.params) {
+                Ok(p) => p,
+                Err(e) => {
+                    return Response {
+                        id: request.id,
+                        result: None,
+                        error: Some(ErrorInfo {
+                            code: -32602,
+                            message: format!("Invalid params: {}", e),
+                        }),
+                    };
+                }
+            };
+
+            match crate::state::reorder_group(
+                &ctx.state,
+                params.group_id,
+                params.parent_id,
+                params.after_group_id,
+            )
+            .await
+            {
+                Ok(group) => {
+                    // Save state after reorder
+                    if let Err(e) = crate::state::save_state(&ctx.state).await {
+                        error!("Failed to save state after group reorder: {}", e);
+                    }
+                    // Emit event so UI updates
+                    let _ = ctx.event_tx.send(Event {
+                        event: "group:updated".to_string(),
+                        data: serde_json::to_value(&group).unwrap(),
+                    });
+                    Response {
+                        id: request.id,
+                        result: Some(serde_json::to_value(&group).unwrap()),
+                        error: None,
+                    }
+                }
+                Err(e) => Response {
+                    id: request.id,
+                    result: None,
+                    error: Some(ErrorInfo {
+                        code: -32000,
+                        message: format!("Failed to reorder group: {}", e),
                     }),
                 },
             }

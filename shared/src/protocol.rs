@@ -65,10 +65,19 @@ pub struct SessionResizeParams {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionRestartParams {
+    pub session_id: Uuid,
+    pub rows: u16,
+    pub cols: u16,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ForkSessionParams {
     pub session_id: Uuid,
     pub new_name: Option<String>,
     pub group_id: Option<Uuid>,
+    pub rows: u16,
+    pub cols: u16,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -95,6 +104,24 @@ pub struct UpdateGroupParams {
     pub group_id: Uuid,
     pub name: Option<String>,
     pub parent_id: Option<Option<Uuid>>, // None = don't change, Some(None) = make root, Some(Some(id)) = set parent
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReorderSessionParams {
+    pub session_id: Uuid,
+    /// New group for the session (None = root level, Some(id) = move to group)
+    pub group_id: Option<Uuid>,
+    /// Insert after this session ID (None = insert at beginning)
+    pub after_session_id: Option<Uuid>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReorderGroupParams {
+    pub group_id: Uuid,
+    /// New parent for the group (None = root level, Some(id) = nest under parent)
+    pub parent_id: Option<Uuid>,
+    /// Insert after this group ID (None = insert at beginning)
+    pub after_group_id: Option<Uuid>,
 }
 
 // --- Event Data ---
