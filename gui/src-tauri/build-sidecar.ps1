@@ -39,7 +39,8 @@ if (-not (Test-Path $BinariesDir)) {
 }
 
 # Copy binary with target suffix (Tauri convention)
-$SourceBinary = Join-Path $ProjectRoot "target" $TargetTriple "release" "claude-master-daemon.exe"
+# Note: Join-Path only accepts 2 arguments, so chain them
+$SourceBinary = Join-Path (Join-Path (Join-Path (Join-Path $ProjectRoot "target") $TargetTriple) "release") "claude-master-daemon.exe"
 $DestBinary = Join-Path $BinariesDir "claude-master-daemon-$TargetTriple.exe"
 
 Copy-Item $SourceBinary $DestBinary -Force
