@@ -20,16 +20,8 @@ import { EditSessionDialog } from "./EditSessionDialog";
 import { EditGroupDialog } from "./EditGroupDialog";
 import { SettingsModal } from "./SettingsModal";
 import { ContextMenu, ContextMenuItem, MenuIcons } from "./ContextMenu";
+import { StatusPill } from "./StatusPill";
 import type { Group, GroupNode, Session, SessionStatus } from "../types";
-
-// Status indicator colors (keys must match lowercase backend values)
-const statusColors: Record<SessionStatus, string> = {
-  stopped: "bg-gray-500",
-  running: "bg-green-500",
-  waiting: "bg-yellow-500",
-  error: "bg-red-500",
-  idle: "bg-blue-500",
-};
 
 // Type for navigable items in the sidebar
 type NavItem =
@@ -125,11 +117,8 @@ function SessionItem(props: {
       onContextMenu={handleContextMenu}
       tabIndex={-1}
     >
-      <span
-        class={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${statusColors[props.session.status]}`}
-        title={props.session.status}
-      />
       <span class="truncate flex-1">{props.session.name}</span>
+      <StatusPill status={props.session.status} />
     </div>
   );
 }
@@ -176,11 +165,8 @@ function SortableSession(props: {
       tabIndex={-1}
       {...sortable.dragActivators}
     >
-      <span
-        class={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${statusColors[props.session.status]}`}
-        title={props.session.status}
-      />
       <span class="truncate flex-1">{props.session.name}</span>
+      <StatusPill status={props.session.status} />
     </div>
   );
 }
