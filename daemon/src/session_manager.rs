@@ -1,6 +1,6 @@
 use anyhow::Result;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use shared::{Event, Group, PtyOutputData, Session, SessionStatus, StatusChangedData};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -10,39 +10,29 @@ use tracing::{debug, info};
 use uuid::Uuid;
 
 use crate::claude;
+use crate::hook_listener::HookEvent;
+use crate::hook_manager::HookManager;
 use crate::pty::PtyManager;
 use crate::state::{save_state, SharedState};
-
-/// Track pending status transitions for debouncing
-struct StatusDebounce {
-    /// When the current status was last confirmed (by seeing its indicator)
-    last_confirmed: DateTime<Utc>,
-    /// Pending transition: (new_status, first_seen_at)
-    pending: Option<(SessionStatus, DateTime<Utc>)>,
-}
+use crate::status_tracker::StatusTracker;
 
 pub struct SessionManager {
     state: SharedState,
     pty_manager: Arc<PtyManager>,
     event_tx: broadcast::Sender<Event>,
     output_tx: mpsc::Sender<(Uuid, Vec<u8>)>,
-    /// Debounce state per session
-    debounce: Arc<RwLock<HashMap<Uuid, StatusDebounce>>>,
+    /// Hook manager for environment variables and hook script
+    #[allow(dead_code)]
+    hook_manager: Arc<HookManager>,
+    /// Status trackers per session (using velocity-based detection)
+    status_trackers: Arc<RwLock<HashMap<Uuid, StatusTracker>>>,
 }
-
-/// Minimum time (ms) a new status must be seen before transitioning
-/// This prevents flapping between states during rapid TUI updates
-#[allow(dead_code)]
-const STATUS_DEBOUNCE_MS: i64 = 500;
-
-/// Running status has a longer cooldown before transitioning to waiting
-/// This matches agent-deck's behavior where GREEN stays for ~2 seconds
-const RUNNING_COOLDOWN_MS: i64 = 2000;
 
 impl SessionManager {
     pub fn new(
         state: SharedState,
         event_tx: broadcast::Sender<Event>,
+        hook_manager: Arc<HookManager>,
     ) -> (Self, mpsc::Receiver<(Uuid, Vec<u8>)>) {
         let (output_tx, output_rx) = mpsc::channel(1000);
         let manager = Self {
@@ -50,12 +40,23 @@ impl SessionManager {
             pty_manager: Arc::new(PtyManager::new()),
             event_tx,
             output_tx,
-            debounce: Arc::new(RwLock::new(HashMap::new())),
+            hook_manager,
+            status_trackers: Arc::new(RwLock::new(HashMap::new())),
         };
         (manager, output_rx)
     }
 
-    pub async fn run(self, mut output_rx: mpsc::Receiver<(Uuid, Vec<u8>)>) {
+    /// Get the hook manager for external use (e.g., starting hook listener)
+    #[allow(dead_code)]
+    pub fn hook_manager(&self) -> Arc<HookManager> {
+        self.hook_manager.clone()
+    }
+
+    pub async fn run(
+        self,
+        mut output_rx: mpsc::Receiver<(Uuid, Vec<u8>)>,
+        mut hook_rx: mpsc::Receiver<HookEvent>,
+    ) {
         info!("Session manager started");
 
         // Spawn background task to check for waiting→idle transitions
@@ -65,41 +66,57 @@ impl SessionManager {
             Self::idle_checker(idle_state, idle_event_tx).await;
         });
 
-        while let Some((session_id, data)) = output_rx.recv().await {
-            // Convert to string for status detection (lossy is fine for pattern matching)
-            let text = String::from_utf8_lossy(&data);
+        loop {
+            tokio::select! {
+                // Handle PTY output
+                Some((session_id, data)) = output_rx.recv() => {
+                    // Convert to string for status detection (lossy is fine for pattern matching)
+                    let text = String::from_utf8_lossy(&data);
 
-            // Debug: log a sample of the text for status detection debugging
-            let sample: String = text.chars().take(100).collect();
-            let printable_sample: String = sample
-                .chars()
-                .map(|c| if c.is_control() && c != '\n' { '.' } else { c })
-                .collect();
-            debug!(
-                "PTY output: {} bytes, sample: {:?}",
-                data.len(),
-                printable_sample
-            );
+                    // Debug: log a sample of the text for status detection debugging
+                    let sample: String = text.chars().take(100).collect();
+                    let printable_sample: String = sample
+                        .chars()
+                        .map(|c| if c.is_control() && c != '\n' { '.' } else { c })
+                        .collect();
+                    debug!(
+                        "PTY output: {} bytes, sample: {:?}",
+                        data.len(),
+                        printable_sample
+                    );
 
-            // Detect status changes with debouncing
-            if let Some(detected_status) = claude::detect_status(&text) {
-                self.handle_status_detection(session_id, detected_status)
-                    .await;
+                    // Detect status changes with debouncing
+                    if let Some(detected_status) = claude::detect_status(&text) {
+                        self.handle_status_detection(session_id, detected_status)
+                            .await;
+                    }
+
+                    // Extract Claude session ID if present
+                    if let Some(claude_session_id) = claude::extract_session_id(&text) {
+                        self.update_claude_session_id(session_id, claude_session_id)
+                            .await;
+                    }
+
+                    // Forward output as event
+                    let output = BASE64.encode(&data);
+                    let event = Event {
+                        event: "pty:output".to_string(),
+                        data: serde_json::to_value(PtyOutputData { session_id, output }).unwrap(),
+                    };
+                    let _ = self.event_tx.send(event);
+                }
+
+                // Handle hook events (authoritative status from Claude hooks)
+                Some(hook_event) = hook_rx.recv() => {
+                    self.handle_hook_event(hook_event).await;
+                }
+
+                // Both channels closed - exit
+                else => {
+                    info!("Session manager channels closed, shutting down");
+                    break;
+                }
             }
-
-            // Extract Claude session ID if present
-            if let Some(claude_session_id) = claude::extract_session_id(&text) {
-                self.update_claude_session_id(session_id, claude_session_id)
-                    .await;
-            }
-
-            // Forward output as event
-            let output = BASE64.encode(&data);
-            let event = Event {
-                event: "pty:output".to_string(),
-                data: serde_json::to_value(PtyOutputData { session_id, output }).unwrap(),
-            };
-            let _ = self.event_tx.send(event);
         }
     }
 
@@ -150,13 +167,11 @@ impl SessionManager {
 
     /// Handle status detection with debouncing to prevent flapping
     ///
-    /// This implements a cooldown-based approach similar to agent-deck:
+    /// Uses StatusTracker for sophisticated velocity-based detection and debouncing:
     /// - Transition TO Running is IMMEDIATE (user should see activity right away)
     /// - Transition FROM Running has a 2 second cooldown (prevent flapping during TUI updates)
     /// - This handles interleaved chunks where some have "esc to interrupt" and some don't
     async fn handle_status_detection(&self, session_id: Uuid, detected_status: SessionStatus) {
-        let now = Utc::now();
-
         // Get current session status
         let current_status = {
             let s = self.state.read().await;
@@ -167,83 +182,48 @@ impl SessionManager {
             return;
         };
 
-        // Same status - just update last_confirmed but DON'T reset pending
-        // This is important: if we're Running and see Running, keep pending Waiting timer
-        // if we're Waiting and see Waiting, keep pending Running timer
-        if detected_status == current_status {
-            let mut debounce = self.debounce.write().await;
-            if let Some(state) = debounce.get_mut(&session_id) {
-                state.last_confirmed = now;
-                // NOTE: We intentionally don't reset pending here!
-                // Interleaved chunks shouldn't cancel pending transitions
-            }
-            return;
+        // Use StatusTracker for debounced transitions
+        let mut trackers = self.status_trackers.write().await;
+        let tracker = trackers
+            .entry(session_id)
+            .or_insert_with(|| StatusTracker::new(current_status));
+
+        if let Some(new_status) = tracker.handle_detected_status(current_status, detected_status) {
+            drop(trackers); // Release lock before async call
+            self.update_session_status(session_id, new_status).await;
         }
+    }
 
-        // IMMEDIATE transition TO Running - don't debounce
-        // User should see the "running" indicator as soon as Claude starts working
-        if detected_status == SessionStatus::Running {
-            debug!(
-                "Immediate transition to Running for {}: {:?} -> {:?}",
-                session_id, current_status, detected_status
-            );
-            let mut debounce = self.debounce.write().await;
-            if let Some(state) = debounce.get_mut(&session_id) {
-                state.last_confirmed = now;
-                state.pending = None;
+    /// Handle hook events from Claude Code lifecycle hooks
+    /// These provide authoritative status information
+    async fn handle_hook_event(&self, event: HookEvent) {
+        // Parse session_id from the hook event
+        let session_id = match Uuid::parse_str(&event.session_id) {
+            Ok(id) => id,
+            Err(_) => {
+                debug!("Invalid session ID in hook event: {}", event.session_id);
+                return;
             }
-            drop(debounce);
-            self.update_session_status(session_id, detected_status)
-                .await;
-            return;
-        }
+        };
 
-        // Transition FROM Running requires cooldown (prevents flapping)
-        // Only apply debounce when leaving Running state
-        if current_status == SessionStatus::Running {
-            let mut debounce = self.debounce.write().await;
-            let state = debounce.entry(session_id).or_insert(StatusDebounce {
-                last_confirmed: now,
-                pending: None,
-            });
-
-            match &state.pending {
-                Some((pending_status, first_seen)) if *pending_status == detected_status => {
-                    // Same pending status - check if cooldown has passed
-                    let elapsed_ms = (now - *first_seen).num_milliseconds();
-
-                    if elapsed_ms >= RUNNING_COOLDOWN_MS {
-                        debug!(
-                            "Running cooldown complete for {}: Running -> {:?} (after {}ms)",
-                            session_id, detected_status, elapsed_ms
-                        );
-                        state.pending = None;
-                        state.last_confirmed = now;
-                        drop(debounce);
-                        self.update_session_status(session_id, detected_status)
-                            .await;
-                    }
-                    // Otherwise, keep waiting for cooldown
-                }
-                _ => {
-                    // Start cooldown timer for leaving Running
-                    debug!(
-                        "Starting Running cooldown for {}: Running -> {:?}",
-                        session_id, detected_status
-                    );
-                    state.pending = Some((detected_status, now));
-                }
+        // Map hook event to status
+        let new_status = match event.state.as_str() {
+            "waiting" => SessionStatus::Waiting,
+            "running" => SessionStatus::Running,
+            "idle" => SessionStatus::Idle,
+            _ => {
+                debug!("Unknown hook state: {}", event.state);
+                return;
             }
-            return;
-        }
+        };
 
-        // Other transitions (not involving Running) - immediate
         debug!(
-            "Immediate transition for {}: {:?} -> {:?}",
-            session_id, current_status, detected_status
+            "Hook event: session={} state={} event={}",
+            session_id, event.state, event.event
         );
-        self.update_session_status(session_id, detected_status)
-            .await;
+
+        // Hook events are authoritative - bypass debouncing
+        self.update_session_status(session_id, new_status).await;
     }
 
     async fn update_claude_session_id(&self, session_id: Uuid, claude_session_id: String) {
@@ -410,6 +390,7 @@ impl SessionManager {
         pty_manager: &PtyManager,
         output_tx: mpsc::Sender<(Uuid, Vec<u8>)>,
         event_tx: &broadcast::Sender<Event>,
+        hook_manager: &HookManager,
         source_session_id: Uuid,
         new_name: Option<String>,
         new_group_id: Option<Uuid>,
@@ -441,6 +422,9 @@ impl SessionManager {
 
         let mut session = Session::new(name, working_dir.clone(), new_group_id.or(group_id));
 
+        // Get hook environment variables for this session
+        let hook_env = hook_manager.get_env_vars(&session.id.to_string());
+
         // Spawn PTY with --resume flag using provided dimensions
         info!("Spawning forked PTY with size {}x{}", cols, rows);
         pty_manager
@@ -451,6 +435,7 @@ impl SessionManager {
                 cols,
                 output_tx,
                 Some(&claude_session_id),
+                hook_env,
             )
             .await?;
 
@@ -487,6 +472,7 @@ impl SessionManager {
         pty_manager: &PtyManager,
         output_tx: mpsc::Sender<(Uuid, Vec<u8>)>,
         event_tx: &broadcast::Sender<Event>,
+        hook_manager: &HookManager,
         session_id: Uuid,
         rows: u16,
         cols: u16,
@@ -506,12 +492,15 @@ impl SessionManager {
             pty_manager.kill(session_id).await?;
         }
 
+        // Get hook environment variables for this session
+        let hook_env = hook_manager.get_env_vars(&session_id.to_string());
+
         // Spawn new PTY with specified dimensions
         // This is critical - Claude Code checks terminal size at startup
         // to decide whether to use full TUI mode with alternate screen buffer
         info!("Spawning PTY with size {}x{}", cols, rows);
         pty_manager
-            .spawn(session_id, &working_dir, rows, cols, output_tx)
+            .spawn(session_id, &working_dir, rows, cols, output_tx, hook_env)
             .await?;
 
         // Update session state

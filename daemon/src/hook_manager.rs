@@ -3,7 +3,7 @@
 
 use anyhow::Result;
 use std::path::PathBuf;
-use tracing::{debug, info};
+use tracing::info;
 
 /// The hook script content - embedded in the binary
 const HOOK_SCRIPT: &str = r#"#!/bin/bash
@@ -131,7 +131,6 @@ impl Default for HookManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::env;
 
     #[test]
     fn test_env_vars() {

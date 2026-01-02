@@ -36,8 +36,9 @@ impl PtyManager {
         rows: u16,
         cols: u16,
         output_tx: mpsc::Sender<(Uuid, Vec<u8>)>,
+        extra_env: Vec<(String, String)>,
     ) -> Result<()> {
-        self.spawn_with_resume(session_id, working_dir, rows, cols, output_tx, None)
+        self.spawn_with_resume(session_id, working_dir, rows, cols, output_tx, None, extra_env)
             .await
     }
 
@@ -49,6 +50,7 @@ impl PtyManager {
         cols: u16,
         output_tx: mpsc::Sender<(Uuid, Vec<u8>)>,
         resume_session_id: Option<&str>,
+        extra_env: Vec<(String, String)>,
     ) -> Result<()> {
         let pty_system = native_pty_system();
 
@@ -61,10 +63,10 @@ impl PtyManager {
 
         // Try direct Claude execution first, fall back to shell wrapper if needed
         let cmd = if let Some(claude_path) = self.claude_resolver.claude_path() {
-            self.build_direct_command(claude_path, working_dir, resume_session_id)?
+            self.build_direct_command(claude_path, working_dir, resume_session_id, &extra_env)?
         } else {
             warn!("Claude binary not found, falling back to shell wrapper");
-            self.build_shell_command(working_dir, resume_session_id)?
+            self.build_shell_command(working_dir, resume_session_id, &extra_env)?
         };
 
         info!("PTY spawn: executing spawn_command...");
@@ -144,6 +146,7 @@ impl PtyManager {
         claude_path: &std::path::PathBuf,
         working_dir: &Path,
         resume_session_id: Option<&str>,
+        extra_env: &[(String, String)],
     ) -> Result<CommandBuilder> {
         info!(
             "PTY spawn: direct execution {:?} cwd={:?}",
@@ -162,6 +165,11 @@ impl PtyManager {
             cmd.env(&key, &value);
         }
 
+        // Set additional environment variables (e.g., hook configuration)
+        for (key, value) in extra_env {
+            cmd.env(key, value);
+        }
+
         // Remove CI detection variables
         for var in ClaudeResolver::env_vars_to_remove() {
             cmd.env_remove(var);
@@ -176,6 +184,7 @@ impl PtyManager {
         &self,
         working_dir: &Path,
         resume_session_id: Option<&str>,
+        extra_env: &[(String, String)],
     ) -> Result<CommandBuilder> {
         let claude_cmd = if let Some(claude_session_id) = resume_session_id {
             format!("claude --resume {}", claude_session_id)
@@ -223,6 +232,11 @@ impl PtyManager {
         cmd.env("FORCE_COLOR", "1");
         cmd.env("TERM_PROGRAM", "xterm");
         cmd.env("LC_ALL", "en_US.UTF-8");
+
+        // Set additional environment variables (e.g., hook configuration)
+        for (key, value) in extra_env {
+            cmd.env(key, value);
+        }
 
         // Remove CI-related environment variables
         for var in ClaudeResolver::env_vars_to_remove() {

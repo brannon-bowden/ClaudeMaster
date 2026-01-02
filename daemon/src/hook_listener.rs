@@ -19,6 +19,7 @@ pub struct HookEvent {
     /// The hook event type (tool_approval, tool_complete, stopped)
     pub event: String,
     /// Unix timestamp when the event occurred
+    #[allow(dead_code)]
     pub ts: u64,
 }
 
@@ -89,6 +90,7 @@ impl HookListener {
     }
 
     /// Get the socket path
+    #[allow(dead_code)]
     pub fn socket_path(&self) -> &PathBuf {
         &self.socket_path
     }

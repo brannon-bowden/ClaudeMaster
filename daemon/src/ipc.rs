@@ -18,6 +18,7 @@ use tokio::sync::{broadcast, mpsc};
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
+use crate::hook_manager::HookManager;
 use crate::pty::PtyManager;
 use crate::session_manager::SessionManager;
 use crate::state::SharedState;
@@ -30,6 +31,7 @@ pub struct IpcContext {
     pub output_tx: mpsc::Sender<(Uuid, Vec<u8>)>,
     pub event_tx: EventSender,
     pub shutdown_flag: Arc<AtomicBool>,
+    pub hook_manager: Arc<HookManager>,
 }
 
 pub async fn start_server(socket_path: &Path, ctx: Arc<IpcContext>) -> Result<()> {
@@ -430,6 +432,7 @@ async fn process_request(line: &str, ctx: &IpcContext) -> Response {
                 &ctx.pty_manager,
                 ctx.output_tx.clone(),
                 &ctx.event_tx,
+                &ctx.hook_manager,
                 params.session_id,
                 params.rows,
                 params.cols,
@@ -476,6 +479,7 @@ async fn process_request(line: &str, ctx: &IpcContext) -> Response {
                 &ctx.pty_manager,
                 ctx.output_tx.clone(),
                 &ctx.event_tx,
+                &ctx.hook_manager,
                 params.session_id,
                 params.new_name,
                 params.group_id,

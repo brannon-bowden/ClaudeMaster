@@ -29,6 +29,7 @@ impl ClaudeResolver {
     }
 
     /// Check if claude was found
+    #[allow(dead_code)]
     pub fn is_available(&self) -> bool {
         self.claude_path.is_some()
     }

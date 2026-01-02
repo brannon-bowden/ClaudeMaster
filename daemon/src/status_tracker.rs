@@ -8,8 +8,11 @@ use std::time::{Duration, Instant};
 use tracing::debug;
 
 /// Configuration for status tracking behavior
+#[allow(dead_code)]
 const VELOCITY_WINDOW_SECS: u64 = 1; // Reset velocity if no output for this long
+#[allow(dead_code)]
 const WORKING_BYTE_THRESHOLD: usize = 200; // Minimum bytes to trigger working debounce
+#[allow(dead_code)]
 const WORKING_DEBOUNCE_MS: u64 = 300; // How long to wait before confirming working state
 const RUNNING_COOLDOWN_MS: u64 = 2000; // Cooldown before leaving running state
 
@@ -18,12 +21,16 @@ pub struct StatusTracker {
     /// Current confirmed status
     last_status: SessionStatus,
     /// When the current status was last confirmed
+    #[allow(dead_code)]
     last_change: Instant,
-    /// Recent output bytes for velocity calculation
+    /// Recent output bytes for velocity calculation (for future velocity-based detection)
+    #[allow(dead_code)]
     recent_output_bytes: usize,
-    /// When we last received output
+    /// When we last received output (for future velocity-based detection)
+    #[allow(dead_code)]
     last_output_time: Instant,
-    /// Pending transition to working state (started at)
+    /// Pending transition to working state (for future velocity-based detection)
+    #[allow(dead_code)]
     working_debounce: Option<Instant>,
     /// Pending transition from running state (to_status, started at)
     pending_transition: Option<(SessionStatus, Instant)>,
@@ -44,6 +51,8 @@ impl StatusTracker {
 
     /// Process PTY output and potentially detect a status change
     /// Returns Some(new_status) if status should transition
+    /// Note: This is for future velocity-based detection; currently using claude::detect_status()
+    #[allow(dead_code)]
     pub fn process_output(&mut self, text: &str) -> Option<SessionStatus> {
         // Strip ANSI codes for cleaner pattern matching
         let clean_text = strip_ansi(text);
@@ -184,12 +193,14 @@ impl StatusTracker {
     }
 
     /// Get the current tracked status
+    #[allow(dead_code)]
     pub fn current_status(&self) -> SessionStatus {
         self.last_status
     }
 }
 
 /// Strip ANSI escape sequences from text
+#[allow(dead_code)]
 fn strip_ansi(text: &str) -> String {
     lazy_static! {
         static ref ANSI_RE: Regex = Regex::new(r"\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x07]*\x07").unwrap();
@@ -198,6 +209,7 @@ fn strip_ansi(text: &str) -> String {
 }
 
 /// Check if text contains error patterns
+#[allow(dead_code)]
 fn has_error_pattern(text: &str) -> bool {
     lazy_static! {
         static ref ERROR_PATTERNS: Vec<Regex> = vec![
@@ -211,6 +223,7 @@ fn has_error_pattern(text: &str) -> bool {
 }
 
 /// Check if text contains waiting/prompt patterns
+#[allow(dead_code)]
 fn has_waiting_pattern(text: &str) -> bool {
     lazy_static! {
         static ref WAITING_PATTERNS: Vec<Regex> = vec![
@@ -228,6 +241,7 @@ fn has_waiting_pattern(text: &str) -> bool {
 }
 
 /// Check if text contains running/working patterns
+#[allow(dead_code)]
 fn has_running_pattern(text: &str) -> bool {
     lazy_static! {
         static ref RUNNING_PATTERNS: Vec<Regex> = vec![
@@ -243,6 +257,7 @@ fn has_running_pattern(text: &str) -> bool {
 
 /// Check if text indicates we're in a hook phase (pre/post tool use)
 /// Hook output should not trigger status changes
+#[allow(dead_code)]
 fn in_hook_phase(text: &str) -> bool {
     lazy_static! {
         static ref HOOK_PATTERNS: Vec<Regex> = vec![
