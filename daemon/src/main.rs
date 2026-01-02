@@ -1,4 +1,5 @@
 mod claude;
+mod claude_resolver;
 mod config;
 mod ipc;
 mod pty;

@@ -1,13 +1,14 @@
 use anyhow::Result;
 use portable_pty::{native_pty_system, CommandBuilder, PtyPair, PtySize};
 use std::collections::HashMap;
-use std::env;
 use std::io::{Read, Write};
 use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex, RwLock};
-use tracing::{error, info};
+use tracing::{error, info, warn};
 use uuid::Uuid;
+
+use crate::claude_resolver::ClaudeResolver;
 
 pub struct PtyInstance {
     pub pair: PtyPair,
@@ -17,12 +18,14 @@ pub struct PtyInstance {
 
 pub struct PtyManager {
     instances: RwLock<HashMap<Uuid, Arc<Mutex<PtyInstance>>>>,
+    claude_resolver: ClaudeResolver,
 }
 
 impl PtyManager {
     pub fn new() -> Self {
         Self {
             instances: RwLock::new(HashMap::new()),
+            claude_resolver: ClaudeResolver::new(),
         }
     }
 
@@ -56,91 +59,13 @@ impl PtyManager {
             pixel_height: 0,
         })?;
 
-        // Build the claude command with optional --resume flag
-        let claude_cmd = if let Some(claude_session_id) = resume_session_id {
-            format!("claude --resume {}", claude_session_id)
+        // Try direct Claude execution first, fall back to shell wrapper if needed
+        let cmd = if let Some(claude_path) = self.claude_resolver.claude_path() {
+            self.build_direct_command(claude_path, working_dir, resume_session_id)?
         } else {
-            "claude".to_string()
+            warn!("Claude binary not found, falling back to shell wrapper");
+            self.build_shell_command(working_dir, resume_session_id)?
         };
-
-        // Get home directory - critical for login shell to work
-        // When running as a sidecar, HOME may not be set in environment
-        let home_dir = env::var("HOME")
-            .ok()
-            .or_else(|| dirs::home_dir().map(|p| p.to_string_lossy().into_owned()))
-            .unwrap_or_else(|| {
-                // Last resort fallback for macOS
-                if cfg!(target_os = "macos") {
-                    format!("/Users/{}", whoami::username())
-                } else {
-                    format!("/home/{}", whoami::username())
-                }
-            });
-
-        // Get the user's shell
-        // Try SHELL env, then check passwd entry via dirs, or use system default
-        let shell = env::var("SHELL").unwrap_or_else(|_| {
-            if cfg!(target_os = "macos") {
-                "/bin/zsh".to_string()
-            } else {
-                "/bin/bash".to_string()
-            }
-        });
-
-        info!(
-            "PTY spawn: shell={} cmd='{}' cwd={:?} HOME={}",
-            shell, claude_cmd, working_dir, home_dir
-        );
-
-        // Use login interactive shell (-li) to source user's full profile
-        // -l sources .zprofile/.bash_profile, -i sources .zshrc/.bashrc
-        // This ensures PATH includes npm global binaries, homebrew, etc.
-        // The -c flag runs the command and exits
-        let mut cmd = CommandBuilder::new(&shell);
-        cmd.arg("-li"); // Login + Interactive shell - sources all profile files
-        cmd.arg("-c"); // Run command
-        cmd.arg(&claude_cmd);
-        cmd.cwd(working_dir);
-
-        // Always set HOME - critical for login shell to find profile and for claude to work
-        cmd.env("HOME", &home_dir);
-        // Also set USER if not set
-        cmd.env("USER", whoami::username());
-        // Set TERM - critical for TUI apps like Claude Code to use correct escape sequences
-        // xterm.js emulates xterm-256color
-        cmd.env("TERM", "xterm-256color");
-        // Also set COLORTERM for apps that check for true color support
-        cmd.env("COLORTERM", "truecolor");
-
-        // Force interactive/TUI mode for Ink-based apps like Claude Code
-        // Ink checks these to decide whether to use alternate screen buffer
-        cmd.env("FORCE_COLOR", "1"); // Force color output
-        cmd.env("TERM_PROGRAM", "xterm"); // Identify as xterm-compatible
-        cmd.env("LC_ALL", "en_US.UTF-8"); // Ensure UTF-8 locale
-
-        // Remove CI-related environment variables that cause TUI apps to use non-interactive mode
-        // The ci-info package checks many of these - we remove the common ones
-        cmd.env_remove("CI");
-        cmd.env_remove("CONTINUOUS_INTEGRATION");
-        cmd.env_remove("BUILD_NUMBER");
-        cmd.env_remove("BUILD_ID");
-        cmd.env_remove("GITHUB_ACTIONS");
-        cmd.env_remove("GITLAB_CI");
-        cmd.env_remove("CIRCLECI");
-        cmd.env_remove("TRAVIS");
-        cmd.env_remove("JENKINS_URL");
-        cmd.env_remove("HUDSON_URL");
-        cmd.env_remove("BUILDKITE");
-        cmd.env_remove("TEAMCITY_VERSION");
-        cmd.env_remove("BITBUCKET_COMMIT");
-        cmd.env_remove("CODEBUILD_BUILD_ARN");
-        cmd.env_remove("DRONE");
-        cmd.env_remove("VERCEL");
-        cmd.env_remove("NETLIFY");
-        cmd.env_remove("RENDER");
-        cmd.env_remove("SEMAPHORE");
-        cmd.env_remove("APPVEYOR");
-        cmd.env_remove("TF_BUILD"); // Azure Pipelines
 
         info!("PTY spawn: executing spawn_command...");
         let child = pair.slave.spawn_command(cmd)?;
@@ -210,6 +135,101 @@ impl PtyManager {
         });
 
         Ok(())
+    }
+
+    /// Build command for direct Claude binary execution (preferred method)
+    /// Avoids shell startup noise for cleaner PTY output
+    fn build_direct_command(
+        &self,
+        claude_path: &std::path::PathBuf,
+        working_dir: &Path,
+        resume_session_id: Option<&str>,
+    ) -> Result<CommandBuilder> {
+        info!(
+            "PTY spawn: direct execution {:?} cwd={:?}",
+            claude_path, working_dir
+        );
+
+        let mut cmd = CommandBuilder::new(claude_path);
+        if let Some(claude_session_id) = resume_session_id {
+            cmd.arg("--resume");
+            cmd.arg(claude_session_id);
+        }
+        cmd.cwd(working_dir);
+
+        // Set environment from resolver
+        for (key, value) in self.claude_resolver.build_env() {
+            cmd.env(&key, &value);
+        }
+
+        // Remove CI detection variables
+        for var in ClaudeResolver::env_vars_to_remove() {
+            cmd.env_remove(var);
+        }
+
+        Ok(cmd)
+    }
+
+    /// Build command using shell wrapper (fallback method)
+    /// Used when Claude binary path cannot be resolved directly
+    fn build_shell_command(
+        &self,
+        working_dir: &Path,
+        resume_session_id: Option<&str>,
+    ) -> Result<CommandBuilder> {
+        let claude_cmd = if let Some(claude_session_id) = resume_session_id {
+            format!("claude --resume {}", claude_session_id)
+        } else {
+            "claude".to_string()
+        };
+
+        // Get home directory
+        let home_dir = std::env::var("HOME")
+            .ok()
+            .or_else(|| dirs::home_dir().map(|p| p.to_string_lossy().into_owned()))
+            .unwrap_or_else(|| {
+                if cfg!(target_os = "macos") {
+                    format!("/Users/{}", whoami::username())
+                } else {
+                    format!("/home/{}", whoami::username())
+                }
+            });
+
+        // Get the user's shell
+        let shell = std::env::var("SHELL").unwrap_or_else(|_| {
+            if cfg!(target_os = "macos") {
+                "/bin/zsh".to_string()
+            } else {
+                "/bin/bash".to_string()
+            }
+        });
+
+        info!(
+            "PTY spawn (shell): shell={} cmd='{}' cwd={:?} HOME={}",
+            shell, claude_cmd, working_dir, home_dir
+        );
+
+        let mut cmd = CommandBuilder::new(&shell);
+        cmd.arg("-li"); // Login + Interactive shell
+        cmd.arg("-c");
+        cmd.arg(&claude_cmd);
+        cmd.cwd(working_dir);
+
+        // Set core environment
+        cmd.env("HOME", &home_dir);
+        cmd.env("USER", whoami::username());
+        cmd.env("TERM", "xterm-256color");
+        cmd.env("COLORTERM", "truecolor");
+        cmd.env("FORCE_COLOR", "1");
+        cmd.env("TERM_PROGRAM", "xterm");
+        cmd.env("LC_ALL", "en_US.UTF-8");
+
+        // Remove CI-related environment variables
+        for var in ClaudeResolver::env_vars_to_remove() {
+            cmd.env_remove(var);
+        }
+
+        Ok(cmd)
     }
 
     pub async fn write(&self, session_id: Uuid, data: &[u8]) -> Result<()> {
