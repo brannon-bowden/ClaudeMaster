@@ -5,6 +5,7 @@ mod ipc;
 mod pty;
 mod session_manager;
 mod state;
+mod status_tracker;
 
 use anyhow::Result;
 use shared::Event;
