@@ -49,3 +49,17 @@ pub fn get_logs_dir() -> Result<PathBuf> {
     fs::create_dir_all(&logs_dir)?;
     Ok(logs_dir)
 }
+
+/// Get the hooks directory for Claude Code hooks
+pub fn get_hooks_dir() -> Result<PathBuf> {
+    let hooks_dir = get_data_dir()?.join("hooks");
+    fs::create_dir_all(&hooks_dir)?;
+    Ok(hooks_dir)
+}
+
+/// Get the hook events socket path
+/// Claude hooks communicate status via this Unix socket
+#[cfg(unix)]
+pub fn get_hook_socket_path() -> Result<PathBuf> {
+    Ok(get_data_dir()?.join("hooks.sock"))
+}

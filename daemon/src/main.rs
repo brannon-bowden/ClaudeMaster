@@ -1,6 +1,8 @@
 mod claude;
 mod claude_resolver;
 mod config;
+mod hook_listener;
+mod hook_manager;
 mod ipc;
 mod pty;
 mod session_manager;
